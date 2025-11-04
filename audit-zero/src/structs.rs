@@ -76,6 +76,24 @@ pub struct MTProof {
     pub index: u32,
 }
 
+impl MTProof {
+    /// check the merkle proof is right
+    pub fn verify(&self) -> bool {
+        for (i, node) in self.nodes.iter().enumerate() {
+            let parent = poseidon_merge_hash(node.left, node.right);
+            if i < TREE_DEPTH - 1 {
+                if self.nodes[i + 1].left != parent && self.nodes[i + 1].right != parent {
+                    return false;
+                }
+            } else {
+                return self.root == parent;
+            }
+        }
+
+        false
+    }
+}
+
 /// PersistentMerkleTree Proof Node, 3-ary merkle tree,
 /// so every leaf has two siblings and own position.
 #[derive(Clone, Debug)]
@@ -88,11 +106,11 @@ pub struct MTNode {
 
 impl<S: Storage> MerkleTree<S> {
     #[inline]
-    fn fetch_comm(&self, key: &[u8]) -> Result<Fr> {
+    fn fetch_comm(&self, key: &[u8]) -> Fr {
         if let Some(comm) = self.cache.get(key) {
-            Ok(*comm)
+            *comm
         } else {
-            self.storage.get(key)
+            self.storage.get(key).unwrap_or(Fr::zero())
         }
     }
 
@@ -125,7 +143,7 @@ impl<S: Storage> MerkleTree<S> {
         // 0. use next index as the leaf index
         let current_index = self.current_index;
 
-        // 1. generate keys of ancestors for update in tree
+        // 1. generate leaf and branches index
         let keys = get_path_keys(current_index);
 
         // 2. save leaf firstly
@@ -134,22 +152,33 @@ impl<S: Storage> MerkleTree<S> {
 
         // 3. calc the leaf hash
         let (leaf1_index, leaf2_index, parent_index) = keys.first().unwrap(); // safe unwrap
-        let leaf1 = self.fetch_comm(&leaf_key(self.ledger, *leaf1_index))?;
-        let leaf2 = self.fetch_comm(&leaf_key(self.ledger, *leaf2_index))?;
-        let parent_comm = poseidon_merge_hash(leaf1, leaf2);
-        self.cache
-            .insert(branch_key(self.ledger, *parent_index), parent_comm);
+        let leaf1 = self.fetch_comm(&leaf_key(self.ledger, *leaf1_index));
+        let leaf2 = self.fetch_comm(&leaf_key(self.ledger, *leaf2_index));
 
-        // 3. update hash of all ancestors of the new leaf
+        self.cache
+            .insert(leaf_key(self.ledger, *leaf1_index), leaf1);
+        self.cache
+            .insert(leaf_key(self.ledger, *leaf2_index), leaf2);
+
+        let parent = poseidon_merge_hash(leaf1, leaf2);
+        self.cache
+            .insert(branch_key(self.ledger, *parent_index), parent);
+
+        // 3. update all branches
         for (left_index, right_index, parent_index) in &keys[1..] {
-            let left_comm = self.fetch_comm(&branch_key(self.ledger, *left_index))?;
-            let right_comm = self.fetch_comm(&branch_key(self.ledger, *right_index))?;
-            let parent_comm = poseidon_merge_hash(left_comm, right_comm);
+            let left = self.fetch_comm(&branch_key(self.ledger, *left_index));
+            let right = self.fetch_comm(&branch_key(self.ledger, *right_index));
+            self.cache
+                .insert(branch_key(self.ledger, *left_index), left);
+            self.cache
+                .insert(branch_key(self.ledger, *right_index), right);
+
+            let parent = poseidon_merge_hash(left, right);
             if *parent_index == ROOT_AS_PARENT {
-                self.current_root = parent_comm;
+                self.current_root = parent;
             } else {
                 self.cache
-                    .insert(branch_key(self.ledger, *parent_index), parent_comm);
+                    .insert(branch_key(self.ledger, *parent_index), parent);
             }
         }
 
@@ -181,7 +210,12 @@ impl<S: Storage> MerkleTree<S> {
 
     /// get leaf hash by index
     pub fn get_leaf(&self, index: u32) -> Result<Fr> {
-        self.fetch_comm(&leaf_key(self.ledger, index))
+        let key = leaf_key(self.ledger, index);
+        if let Some(comm) = self.cache.get(&key) {
+            Ok(*comm)
+        } else {
+            self.storage.get(&key)
+        }
     }
 
     /// get tree current root
@@ -215,11 +249,16 @@ impl<S: Storage> MerkleTree<S> {
         let mut nodes: Vec<MTNode> = vec![];
 
         let (leaf1_index, leaf2_index, _) = keys.first().unwrap(); // safe unwrap
-        let left = self.storage.get(&leaf_key(self.ledger, *leaf1_index))?;
-        let right = self.storage.get(&leaf_key(self.ledger, *leaf2_index))?;
+        let left = self
+            .storage
+            .get(&leaf_key(self.ledger, *leaf1_index))
+            .unwrap_or(Fr::zero());
+        let right = self
+            .storage
+            .get(&leaf_key(self.ledger, *leaf2_index))
+            .unwrap_or(Fr::zero());
         nodes.push(MTNode { left, right });
 
-        // 3. update hash of all ancestors of the new leaf
         for (left_index, right_index, _) in &keys[1..] {
             let left = self.storage.get(&branch_key(self.ledger, *left_index))?;
             let right = self.storage.get(&branch_key(self.ledger, *right_index))?;
@@ -243,14 +282,15 @@ fn get_path_keys(mut index: u32) -> Vec<(u32, u32, u32)> {
 
     let mut parent_acc_pow = 0;
     for i in 0..TREE_DEPTH {
+        let current = index + parent_acc_pow;
         let parent_index = index >> 1;
         parent_acc_pow += 1 << (20 - i);
         let parent = parent_index + parent_acc_pow;
 
         if index & 1 == 0 {
-            keys.push((index, index + 1, parent));
+            keys.push((current, current + 1, parent));
         } else {
-            keys.push((index - 1, index, parent));
+            keys.push((current - 1, current, parent));
         }
         index = parent_index;
     }
@@ -264,4 +304,32 @@ fn simple_fr_to_u32(f: Fr) -> u32 {
 
 fn simple_u32_to_fr(i: u32) -> Fr {
     Fr::from(i)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::MemoryStorage;
+    use ark_std::{UniformRand, test_rng};
+
+    #[test]
+    fn test_merkle_tree() {
+        let rng = &mut test_rng();
+        let storage = MemoryStorage::default();
+        let mut merkle = MerkleTree::new(0, storage).unwrap();
+
+        for _ in 0..10 {
+            merkle.add_leaf(Fr::rand(rng)).unwrap();
+        }
+        merkle.commit().unwrap();
+
+        let proof1 = merkle.generate_proof(0).unwrap();
+        assert!(proof1.verify());
+
+        let proof2 = merkle.generate_proof(5).unwrap();
+        assert!(proof2.verify());
+
+        let proof3 = merkle.generate_proof(9).unwrap();
+        assert!(proof3.verify());
+    }
 }

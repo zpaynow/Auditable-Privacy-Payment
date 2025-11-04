@@ -8,7 +8,7 @@ use ark_std::collections::HashMap;
 pub fn index_key(ledger: u32) -> [u8; 16] {
     let mut empty = [0u8; 16];
     empty[0..4].copy_from_slice(&ledger.to_le_bytes());
-    empty[4] = 1u8;
+    empty[0] = 1u8;
     empty
 }
 
@@ -16,7 +16,7 @@ pub fn index_key(ledger: u32) -> [u8; 16] {
 pub fn version_key(ledger: u32) -> [u8; 16] {
     let mut empty = [0u8; 16];
     empty[0..4].copy_from_slice(&ledger.to_le_bytes());
-    empty[4] = 2u8;
+    empty[0] = 2u8;
     empty
 }
 

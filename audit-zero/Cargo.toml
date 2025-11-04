@@ -1,0 +1,14 @@
+[package]
+name = "audit-zero"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ark-ff = "0.5"
+ark-std = "0.5"
+ark-serialize = "0.5"
+ark-bn254 = "0.5"
+ark-relations = "0.5"
+ark-r1cs-std = "0.5"
+ark-crypto-primitives = { version = "0.5", features = ["crh", "r1cs"] }
+ark-groth16 = "0.5"

@@ -1,9 +1,31 @@
 use ark_bn254::Fr;
 use ark_crypto_primitives::{
-    crh::{TwoToOneCRHScheme, poseidon::TwoToOneCRH},
+    crh::{
+        CRHScheme, CRHSchemeGadget, TwoToOneCRHScheme, TwoToOneCRHSchemeGadget,
+        poseidon::{CRH, TwoToOneCRH},
+    },
     sponge::poseidon::PoseidonConfig,
 };
 use ark_ff::BigInt;
+use ark_r1cs_std::{R1CSVar, fields::fp::FpVar};
+use ark_relations::r1cs::SynthesisError;
+
+/// use common CRH poseidon hash for params
+pub fn poseidon_hash(inputs: &[Fr]) -> Fr {
+    let ark = ROUND_CONSTANTS.iter().map(|v| v.to_vec()).collect();
+    let mds = MDS.iter().map(|v| v.to_vec()).collect();
+
+    let params = PoseidonConfig::<Fr>::new(
+        FULL_ROUNDS,
+        PARTIAL_ROUNDS,
+        POSEIDON_HASH_BYTES_IN_FIELD as u64,
+        mds,
+        ark,
+        RATE,
+        CAPACITY,
+    );
+    CRH::<Fr>::evaluate(&params, inputs).unwrap() // unwrap safe
+}
 
 /// use the TwoToOne for better cs
 pub fn poseidon_merge_hash(left: Fr, right: Fr) -> Fr {
@@ -20,6 +42,57 @@ pub fn poseidon_merge_hash(left: Fr, right: Fr) -> Fr {
         CAPACITY,
     );
     TwoToOneCRH::<Fr>::compress(&params, left, right).unwrap() // unwrap safe
+}
+
+/// Circuit version: Poseidon hash gadget for R1CS constraints
+pub fn poseidon_hash_gadget(inputs: &[FpVar<Fr>]) -> Result<FpVar<Fr>, SynthesisError> {
+    use ark_crypto_primitives::crh::poseidon::constraints::{CRHGadget, CRHParametersVar};
+    use ark_r1cs_std::alloc::AllocVar;
+
+    let ark = ROUND_CONSTANTS.iter().map(|v| v.to_vec()).collect();
+    let mds = MDS.iter().map(|v| v.to_vec()).collect();
+
+    let params_native = PoseidonConfig::<Fr>::new(
+        FULL_ROUNDS,
+        PARTIAL_ROUNDS,
+        POSEIDON_HASH_BYTES_IN_FIELD as u64,
+        mds,
+        ark,
+        RATE,
+        CAPACITY,
+    );
+
+    let cs = inputs[0].cs();
+    let params_var = CRHParametersVar::<Fr>::new_constant(cs, &params_native)?;
+
+    CRHGadget::<Fr>::evaluate(&params_var, inputs)
+}
+
+/// Circuit version: Two-to-one Poseidon hash gadget for Merkle tree
+pub fn poseidon_merge_hash_gadget(
+    left: &FpVar<Fr>,
+    right: &FpVar<Fr>,
+) -> Result<FpVar<Fr>, SynthesisError> {
+    use ark_crypto_primitives::crh::poseidon::constraints::{CRHParametersVar, TwoToOneCRHGadget};
+    use ark_r1cs_std::alloc::AllocVar;
+
+    let ark = ROUND_CONSTANTS.iter().map(|v| v.to_vec()).collect();
+    let mds = MDS.iter().map(|v| v.to_vec()).collect();
+
+    let params_native = PoseidonConfig::<Fr>::new(
+        FULL_ROUNDS,
+        PARTIAL_ROUNDS,
+        POSEIDON_HASH_BYTES_IN_FIELD as u64,
+        mds,
+        ark,
+        RATE,
+        CAPACITY,
+    );
+
+    let cs = left.cs();
+    let params_var = CRHParametersVar::<Fr>::new_constant(cs, &params_native)?;
+
+    TwoToOneCRHGadget::<Fr>::compress(&params_var, left, right)
 }
 
 pub const T: usize = 3; // RATE + CAPACITY

@@ -5,6 +5,7 @@ mod memo;
 mod merkle_tree;
 mod nullifier;
 mod poseidon;
+mod utxo;
 
 mod error;
 mod keys;

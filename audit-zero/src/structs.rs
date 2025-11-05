@@ -1,11 +1,15 @@
-use crate::{AzError, PublicKey, Result, poseidon::poseidon_merge_hash, storage::*};
+use crate::{
+    Keypair, PublicKey, Result,
+    poseidon::{poseidon_hash, poseidon_merge_hash},
+    storage::*,
+};
 use ark_bn254::Fr;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 use ark_std::{Zero, collections::HashMap};
 
 pub type Asset = u64;
 
-pub type Amount = u64;
+pub type Amount = u128;
 
 pub type Commitment = Fr;
 
@@ -13,11 +17,7 @@ pub type Nullifier = Fr;
 
 pub type Blind = Fr;
 
-pub struct Utxo {
-    inputs: Vec<OpenCommitment>,
-    output: Vec<OpenCommitment>,
-}
-
+#[derive(Clone)]
 pub struct OpenCommitment {
     /// asset id
     pub asset: Asset,
@@ -35,11 +35,47 @@ pub struct OpenCommitment {
     pub leaf: Option<MTProof>,
 }
 
+impl OpenCommitment {
+    pub fn commit(&self) -> Commitment {
+        let inputs = [
+            Fr::from(self.asset),
+            Fr::from(self.amount),
+            self.blind,
+            self.owner.0.x,
+            self.owner.0.y,
+        ];
+
+        poseidon_hash(&inputs)
+    }
+
+    pub fn nullify(&self, keypair: &Keypair) -> Nullifier {
+        if let Some(proof) = &self.leaf {
+            let bytes = keypair.secret.0.into_bigint().to_bytes_le();
+            let sk = Fr::from_le_bytes_mod_order(&bytes); // TODO splite two
+
+            let inputs = [
+                Fr::from(self.asset),
+                Fr::from(self.amount),
+                Fr::from(proof.index),
+                keypair.public.0.x,
+                keypair.public.0.y,
+                sk,
+            ];
+
+            poseidon_hash(&inputs)
+        } else {
+            panic!("Still no Merkle proof")
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct OpenMemo {
     pub asset: Asset,
     pub amount: Amount,
 }
 
+#[derive(Clone)]
 pub struct OpenAudit {
     pub asset: Asset,
     // TODO only show the amount range

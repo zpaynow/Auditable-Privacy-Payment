@@ -7,4 +7,8 @@ pub enum AzError {
     MerkleTreeStorageMissing,
     MerkleTreeStorageError,
     MerkleTreeProof,
+    KeypairInvalidSeed,
+    Groth16Setup,
+    Groth16Prove,
+    Groth16Verify,
 }

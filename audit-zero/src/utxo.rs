@@ -1,9 +1,8 @@
-use crate::commitment::commitment_gadget;
-use crate::merkle_tree::merkle_proof_gadget;
-use crate::nullifier::nullifier_gadget;
-use crate::{Keypair, OpenCommitment, structs::MTProof};
-use ark_bn254::{Bn254, Fr};
-use ark_crypto_primitives::snark::SNARK;
+use crate::{
+    Keypair, MTProof, OpenCommitment, commitment::commitment_gadget,
+    merkle_tree::merkle_proof_gadget, nullifier::nullifier_gadget,
+};
+use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
 use ark_r1cs_std::{
     alloc::AllocVar,
@@ -12,20 +11,51 @@ use ark_r1cs_std::{
     fields::{FieldVar, fp::FpVar},
 };
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
+use ark_std::collections::HashMap;
 
 /// UTXO transaction circuit
 /// Proves correct spending of inputs and creation of outputs with privacy
 #[derive(Clone)]
 pub struct UtxoCircuit {
-    // Private inputs (witness)
-    pub keypair: Option<Keypair>,
+    pub keypair: Keypair,
     pub inputs: Vec<UtxoInput>,
     pub outputs: Vec<UtxoOutput>,
+}
 
-    // Public inputs
+/// UTXO public inputs
+#[derive(Clone, Debug)]
+pub struct Utxo {
     pub nullifiers: Vec<Fr>,
-    pub output_commitments: Vec<Fr>,
+    pub commitments: Vec<Fr>,
+    pub merkle_version: u32,
     pub merkle_root: Fr,
+}
+
+impl UtxoCircuit {
+    /// generate public inputs
+    pub fn publics(&self) -> Utxo {
+        assert!(!self.inputs.is_empty());
+
+        let nullifiers = self
+            .inputs
+            .iter()
+            .map(|input| input.commitment.nullify(&self.keypair))
+            .collect();
+        let commitments = self
+            .outputs
+            .iter()
+            .map(|output| output.commitment.commit())
+            .collect();
+        let merkle_version = self.inputs[0].merkle_proof.version;
+        let merkle_root = self.inputs[0].merkle_proof.root;
+
+        Utxo {
+            nullifiers,
+            commitments,
+            merkle_version,
+            merkle_root,
+        }
+    }
 }
 
 /// Input UTXO being spent
@@ -43,38 +73,35 @@ pub struct UtxoOutput {
 
 impl ConstraintSynthesizer<Fr> for UtxoCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        let utxo = self.publics();
+
         // Allocate public inputs
-        let nullifiers_vars: Vec<FpVar<Fr>> = self
+        let nullifiers_vars: Vec<FpVar<Fr>> = utxo
             .nullifiers
             .iter()
             .map(|n| FpVar::new_input(cs.clone(), || Ok(*n)))
             .collect::<Result<_, _>>()?;
 
-        let output_commitment_vars: Vec<FpVar<Fr>> = self
-            .output_commitments
+        let commitments_vars: Vec<FpVar<Fr>> = utxo
+            .commitments
             .iter()
             .map(|c| FpVar::new_input(cs.clone(), || Ok(*c)))
             .collect::<Result<_, _>>()?;
 
-        let merkle_root_var = FpVar::new_input(cs.clone(), || Ok(self.merkle_root))?;
+        let merkle_root_var = FpVar::new_input(cs.clone(), || Ok(utxo.merkle_root))?;
 
         // Allocate private witness data
-        let keypair = self
-            .keypair
-            .as_ref()
-            .ok_or(SynthesisError::AssignmentMissing)?;
-
-        // Convert secret key to Fr for circuit
-        let sk_bytes = keypair.secret.0.into_bigint().to_bytes_le();
+        let sk_bytes = self.keypair.secret.into_bigint().to_bytes_le();
         let sk_fr = Fr::from_le_bytes_mod_order(&sk_bytes);
 
         let sk_var = FpVar::new_witness(cs.clone(), || Ok(sk_fr))?;
-        let pk_x_var = FpVar::new_witness(cs.clone(), || Ok(keypair.public.0.x))?;
-        let pk_y_var = FpVar::new_witness(cs.clone(), || Ok(keypair.public.0.y))?;
+        let pk_x_var = FpVar::new_witness(cs.clone(), || Ok(self.keypair.public.x))?;
+        let pk_y_var = FpVar::new_witness(cs.clone(), || Ok(self.keypair.public.y))?;
+
+        // TODO sk * G = PK
 
         // Track asset balances
-        let mut asset_balances: std::collections::HashMap<u64, (FpVar<Fr>, FpVar<Fr>)> =
-            std::collections::HashMap::new();
+        let mut asset_balances: HashMap<u64, (FpVar<Fr>, FpVar<Fr>)> = HashMap::new();
 
         // Process inputs
         for (i, input) in self.inputs.iter().enumerate() {
@@ -85,8 +112,8 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
             let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
             let blind_var = FpVar::new_witness(cs.clone(), || Ok(comm.blind))?;
-            let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.0.x))?;
-            let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.0.y))?;
+            let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.x))?;
+            let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.y))?;
 
             // 2. Verify commitment correctness
             let computed_commitment = commitment_gadget(
@@ -102,11 +129,10 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             owner_y_var.enforce_equal(&pk_y_var)?;
 
             // 4. Compute and verify nullifier
-            let index_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(proof.index)))?;
             let computed_nullifier = nullifier_gadget(
+                &computed_commitment,
                 &asset_var,
                 &amount_var,
-                &index_var,
                 &pk_x_var,
                 &pk_y_var,
                 &sk_var,
@@ -149,8 +175,8 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
             let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
             let blind_var = FpVar::new_witness(cs.clone(), || Ok(comm.blind))?;
-            let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.0.x))?;
-            let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.0.y))?;
+            let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.x))?;
+            let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.y))?;
 
             // 2. Compute commitment
             let computed_commitment = commitment_gadget(
@@ -162,7 +188,7 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             )?;
 
             // 3. Verify commitment matches public output
-            computed_commitment.enforce_equal(&output_commitment_vars[i])?;
+            computed_commitment.enforce_equal(&commitments_vars[i])?;
 
             // 4. Track output amounts by asset
             let entry = asset_balances.entry(comm.asset).or_insert((
@@ -181,152 +207,20 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
     }
 }
 
-/// Groth16 proving key
-pub type ProvingKey = ark_groth16::ProvingKey<Bn254>;
-
-/// Groth16 verification key
-pub type VerifyingKey = ark_groth16::VerifyingKey<Bn254>;
-
-/// Groth16 proof
-pub type Proof = ark_groth16::Proof<Bn254>;
-
-/// Setup the Groth16 proving and verification keys for a circuit with given shape
-/// num_inputs: number of input UTXOs
-/// num_outputs: number of output UTXOs
-pub fn setup<R: ark_std::rand::Rng + ark_std::rand::CryptoRng>(
-    num_inputs: usize,
-    num_outputs: usize,
-    rng: &mut R,
-) -> Result<(ProvingKey, VerifyingKey), Box<dyn std::error::Error>> {
-    // Create a dummy circuit for setup matching the desired shape
-    // The circuit needs witness data for constraint generation
-    use crate::{PublicKey, SecretKey, structs::MTNode};
-    use ark_ed_on_bn254::{EdwardsAffine, Fr as EdFr};
-    use ark_std::UniformRand;
-
-    let sk = EdFr::rand(rng);
-    let pk_point = EdwardsAffine::rand(rng);
-    let keypair = Keypair {
-        public: PublicKey(pk_point),
-        secret: SecretKey(sk),
-    };
-
-    let mut inputs = vec![];
-    let mut nullifiers = vec![];
-    for _ in 0..num_inputs {
-        let blind = Fr::rand(rng);
-        let comm = OpenCommitment {
-            asset: 0,
-            amount: 0,
-            owner: keypair.public.clone(),
-            blind,
-            memo: None,
-            audit: None,
-            leaf: None,
-        };
-
-        let mut nodes = vec![];
-        for _ in 0..crate::structs::TREE_DEPTH {
-            nodes.push(MTNode {
-                left: Fr::from(0u64),
-                right: Fr::from(0u64),
-            });
-        }
-
-        let proof = crate::structs::MTProof {
-            nodes,
-            ledger: 0,
-            root: Fr::from(0u64),
-            version: 0,
-            index: 0,
-        };
-
-        let mut comm_with_proof = comm.clone();
-        comm_with_proof.leaf = Some(proof.clone());
-
-        inputs.push(UtxoInput {
-            commitment: comm_with_proof.clone(),
-            merkle_proof: proof,
-        });
-
-        nullifiers.push(comm_with_proof.nullify(&keypair));
-    }
-
-    let mut outputs = vec![];
-    let mut output_commitments = vec![];
-    for _ in 0..num_outputs {
-        let blind = Fr::rand(rng);
-        let comm = OpenCommitment {
-            asset: 0,
-            amount: 0,
-            owner: keypair.public.clone(),
-            blind,
-            memo: None,
-            audit: None,
-            leaf: None,
-        };
-        outputs.push(UtxoOutput {
-            commitment: comm.clone(),
-        });
-        output_commitments.push(comm.commit());
-    }
-
-    let dummy_circuit = UtxoCircuit {
-        keypair: Some(keypair),
-        inputs,
-        outputs,
-        nullifiers,
-        output_commitments,
-        merkle_root: Fr::from(0u64),
-    };
-
-    let (pk, vk) = ark_groth16::Groth16::<Bn254>::circuit_specific_setup(dummy_circuit, rng)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-    Ok((pk, vk))
-}
-
-/// Generate a Groth16 proof for a UTXO transaction
-pub fn prove<R: ark_std::rand::Rng + ark_std::rand::CryptoRng>(
-    pk: &ProvingKey,
-    circuit: UtxoCircuit,
-    rng: &mut R,
-) -> Result<Proof, Box<dyn std::error::Error>> {
-    ark_groth16::Groth16::<Bn254>::prove(pk, circuit, rng)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-}
-
-/// Verify a Groth16 proof for a UTXO transaction
-pub fn verify(
-    vk: &VerifyingKey,
-    public_inputs: &[Fr],
-    proof: &Proof,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    ark_groth16::Groth16::<Bn254>::verify(vk, public_inputs, proof)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemoryStorage;
-    use crate::{PublicKey, SecretKey, structs::MerkleTree};
-    use ark_ed_on_bn254::EdwardsAffine;
-    use ark_std::UniformRand;
-    use ark_std::rand::SeedableRng;
+    use crate::{MemoryStorage, MerkleTree};
+    use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
+    use ark_std::{UniformRand, rand::SeedableRng};
     use rand_chacha::ChaCha20Rng;
 
     #[test]
-    fn test_utxo_circuit_basic() {
+    fn test_utxo_circuit() {
         let rng = &mut ChaCha20Rng::from_seed([42u8; 32]);
 
         // Create keypair
-        let sk = ark_ed_on_bn254::Fr::rand(rng);
-        let pk_point = EdwardsAffine::rand(rng);
-        let keypair = Keypair {
-            public: PublicKey(pk_point),
-            secret: SecretKey(sk),
-        };
+        let keypair = Keypair::generate(rng);
 
         // Create a merkle tree
         let storage = MemoryStorage::default();
@@ -337,139 +231,45 @@ mod tests {
         let input_comm = OpenCommitment {
             asset: 1,
             amount: 100,
-            owner: keypair.public.clone(),
+            owner: keypair.public,
             blind: input_blind,
             memo: None,
             audit: None,
-            leaf: None,
         };
 
         // Add to merkle tree
         let commitment_hash = input_comm.commit();
         let index = merkle.add_leaf(commitment_hash).unwrap();
         merkle.commit().unwrap();
-        let proof = merkle.generate_proof(index).unwrap();
-
-        let mut input_with_proof = input_comm.clone();
-        input_with_proof.leaf = Some(proof.clone());
+        let merkle_proof = merkle.generate_proof(index).unwrap();
 
         // Create output UTXO (same amount, different blind)
         let output_blind = Fr::rand(rng);
         let output_comm = OpenCommitment {
             asset: 1,
             amount: 100,
-            owner: keypair.public.clone(),
+            owner: keypair.public,
             blind: output_blind,
             memo: None,
             audit: None,
-            leaf: None,
         };
-
-        // Compute nullifier and output commitment
-        let nullifier = input_with_proof.nullify(&keypair);
-        let output_commitment = output_comm.commit();
 
         // Create circuit
         let circuit = UtxoCircuit {
-            keypair: Some(keypair),
+            keypair: keypair,
             inputs: vec![UtxoInput {
-                commitment: input_with_proof,
-                merkle_proof: proof,
+                commitment: input_comm,
+                merkle_proof,
             }],
             outputs: vec![UtxoOutput {
                 commitment: output_comm,
             }],
-            nullifiers: vec![nullifier],
-            output_commitments: vec![output_commitment],
-            merkle_root: merkle.get_root().unwrap(),
         };
 
         // Test constraint satisfaction
-        use ark_relations::r1cs::ConstraintSystem;
         let cs = ConstraintSystem::<Fr>::new_ref();
         circuit.clone().generate_constraints(cs.clone()).unwrap();
         assert!(cs.is_satisfied().unwrap());
         println!("Circuit has {} constraints", cs.num_constraints());
-    }
-
-    #[test]
-    fn test_groth16_prove_verify() {
-        let rng = &mut ChaCha20Rng::from_seed([43u8; 32]);
-
-        // Create keypair
-        let sk = ark_ed_on_bn254::Fr::rand(rng);
-        let pk_point = EdwardsAffine::rand(rng);
-        let keypair = Keypair {
-            public: PublicKey(pk_point),
-            secret: SecretKey(sk),
-        };
-
-        // Create a merkle tree
-        let storage = MemoryStorage::default();
-        let mut merkle = MerkleTree::new(0, storage).unwrap();
-
-        // Create input UTXO
-        let input_blind = Fr::rand(rng);
-        let input_comm = OpenCommitment {
-            asset: 1,
-            amount: 100,
-            owner: keypair.public.clone(),
-            blind: input_blind,
-            memo: None,
-            audit: None,
-            leaf: None,
-        };
-
-        // Add to merkle tree
-        let commitment_hash = input_comm.commit();
-        let index = merkle.add_leaf(commitment_hash).unwrap();
-        merkle.commit().unwrap();
-        let proof_merkle = merkle.generate_proof(index).unwrap();
-
-        let mut input_with_proof = input_comm.clone();
-        input_with_proof.leaf = Some(proof_merkle.clone());
-
-        // Create output UTXO
-        let output_blind = Fr::rand(rng);
-        let output_comm = OpenCommitment {
-            asset: 1,
-            amount: 100,
-            owner: keypair.public.clone(),
-            blind: output_blind,
-            memo: None,
-            audit: None,
-            leaf: None,
-        };
-
-        // Compute public inputs
-        let nullifier = input_with_proof.nullify(&keypair);
-        let output_commitment = output_comm.commit();
-        let merkle_root = merkle.get_root().unwrap();
-
-        // Setup with 1 input and 1 output
-        let (pk, vk) = setup(1, 1, rng).unwrap();
-
-        // Create circuit
-        let circuit = UtxoCircuit {
-            keypair: Some(keypair),
-            inputs: vec![UtxoInput {
-                commitment: input_with_proof,
-                merkle_proof: proof_merkle,
-            }],
-            outputs: vec![UtxoOutput {
-                commitment: output_comm,
-            }],
-            nullifiers: vec![nullifier],
-            output_commitments: vec![output_commitment],
-            merkle_root,
-        };
-
-        // Prove
-        let proof = prove(&pk, circuit, rng).unwrap();
-
-        // Verify
-        let public_inputs = vec![nullifier, output_commitment, merkle_root];
-        let valid = verify(&vk, &public_inputs, &proof).unwrap();
-        assert!(valid);
     }
 }

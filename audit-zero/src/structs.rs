@@ -31,8 +31,6 @@ pub struct OpenCommitment {
     pub memo: Option<OpenMemo>,
     /// audit for auditor
     pub audit: Option<OpenAudit>,
-    /// merkle tree info
-    pub leaf: Option<MTProof>,
 }
 
 impl OpenCommitment {
@@ -41,31 +39,29 @@ impl OpenCommitment {
             Fr::from(self.asset),
             Fr::from(self.amount),
             self.blind,
-            self.owner.0.x,
-            self.owner.0.y,
+            self.owner.x,
+            self.owner.y,
         ];
 
         poseidon_hash(&inputs)
     }
 
     pub fn nullify(&self, keypair: &Keypair) -> Nullifier {
-        if let Some(proof) = &self.leaf {
-            let bytes = keypair.secret.0.into_bigint().to_bytes_le();
-            let sk = Fr::from_le_bytes_mod_order(&bytes); // TODO splite two
+        let comm = self.commit();
 
-            let inputs = [
-                Fr::from(self.asset),
-                Fr::from(self.amount),
-                Fr::from(proof.index),
-                keypair.public.0.x,
-                keypair.public.0.y,
-                sk,
-            ];
+        let bytes = keypair.secret.into_bigint().to_bytes_le();
+        let sk = Fr::from_le_bytes_mod_order(&bytes); // TODO splite two
 
-            poseidon_hash(&inputs)
-        } else {
-            panic!("Still no Merkle proof")
-        }
+        let inputs = [
+            comm,
+            Fr::from(self.asset),
+            Fr::from(self.amount),
+            keypair.public.x,
+            keypair.public.y,
+            sk,
+        ];
+
+        poseidon_hash(&inputs)
     }
 }
 

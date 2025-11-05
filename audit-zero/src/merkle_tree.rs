@@ -1,9 +1,7 @@
-use crate::poseidon::poseidon_merge_hash_gadget;
-use crate::structs::TREE_DEPTH;
+use crate::{TREE_DEPTH, poseidon::poseidon_merge_hash_gadget};
 use ark_bn254::Fr;
 use ark_r1cs_std::{boolean::Boolean, fields::fp::FpVar, prelude::*};
 use ark_relations::r1cs::SynthesisError;
-use std::ops::Not;
 
 /// Circuit gadget for verifying Merkle tree membership proof
 /// Given a leaf commitment and a Merkle proof, verify that the leaf is in the tree

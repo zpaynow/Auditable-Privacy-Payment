@@ -26,16 +26,15 @@ pub fn commitment_gadget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Blind, OpenCommitment, PublicKey};
-    use ark_ed_on_bn254::{EdwardsAffine, Fr as EdFr};
-    use ark_ff::{BigInteger, PrimeField};
+    use crate::{Keypair, OpenCommitment};
     use ark_r1cs_std::{R1CSVar, alloc::AllocVar};
     use ark_relations::r1cs::ConstraintSystem;
-    use ark_std::{UniformRand, test_rng};
+    use ark_std::{UniformRand, rand::SeedableRng};
+    use rand_chacha::ChaCha20Rng;
 
     #[test]
     fn test_commitment_gadget() {
-        let rng = &mut test_rng();
+        let rng = &mut ChaCha20Rng::from_seed([42u8; 32]);
         let cs = ConstraintSystem::<Fr>::new_ref();
 
         // Create test data
@@ -44,18 +43,16 @@ mod tests {
         let blind = Fr::rand(rng);
 
         // Create a random point for owner
-        let owner_point = EdwardsAffine::rand(rng);
-        let owner = PublicKey(owner_point);
+        let keypair = Keypair::generate(rng);
 
         // Compute native commitment
         let open_comm = OpenCommitment {
             asset,
             amount,
             blind,
-            owner: owner.clone(),
+            owner: keypair.public,
             memo: None,
             audit: None,
-            leaf: None,
         };
         let expected = open_comm.commit();
 
@@ -63,8 +60,8 @@ mod tests {
         let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(asset))).unwrap();
         let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(amount))).unwrap();
         let blind_var = FpVar::new_witness(cs.clone(), || Ok(blind)).unwrap();
-        let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(owner.0.x)).unwrap();
-        let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(owner.0.y)).unwrap();
+        let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(keypair.public.x)).unwrap();
+        let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(keypair.public.y)).unwrap();
 
         let result = commitment_gadget(
             &asset_var,

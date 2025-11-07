@@ -1,6 +1,7 @@
 use crate::{
-    Keypair, MTProof, OpenCommitment, commitment::commitment_gadget, keys::keypair_gadget,
-    merkle_tree::merkle_proof_gadget, nullifier::nullifier_gadget,
+    Keypair, MTProof, OpenCommitment, PublicKey, audit_gadget::audit_encrypt_gadget,
+    commitment::commitment_gadget, keys::keypair_gadget, merkle_tree::merkle_proof_gadget,
+    nullifier::nullifier_gadget,
 };
 use ark_bn254::Fr;
 use ark_r1cs_std::{
@@ -10,6 +11,7 @@ use ark_r1cs_std::{
     fields::{FieldVar, fp::FpVar},
 };
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
+use ark_serialize::CanonicalDeserialize;
 use ark_std::{
     collections::HashMap,
     rand::{CryptoRng, Rng},
@@ -22,6 +24,15 @@ pub struct UtxoCircuit {
     pub keypair: Keypair,
     pub inputs: Vec<UtxoInput>,
     pub outputs: Vec<UtxoOutput>,
+    pub audit: Option<AuditCircuit>,
+}
+
+/// Audit memo encryption circuit
+#[derive(Clone)]
+pub struct AuditCircuit {
+    pub auditor: PublicKey,
+    pub memos: Vec<Vec<u8>>,
+    pub shares: Vec<Fr>,
 }
 
 /// UTXO public inputs
@@ -32,6 +43,14 @@ pub struct Utxo {
     pub memos: Vec<Vec<u8>>,
     pub merkle_version: u32,
     pub merkle_root: Fr,
+    pub audit: Option<Audit>,
+}
+
+/// UTXO public inputs
+#[derive(Clone, Debug)]
+pub struct Audit {
+    pub auditor: PublicKey,
+    pub memos: Vec<Vec<u8>>,
 }
 
 impl UtxoCircuit {
@@ -58,12 +77,22 @@ impl UtxoCircuit {
         let merkle_version = self.inputs[0].merkle_proof.version;
         let merkle_root = self.inputs[0].merkle_proof.root;
 
+        let audit = if let Some(audit) = &self.audit {
+            Some(Audit {
+                auditor: audit.auditor,
+                memos: audit.memos.clone(),
+            })
+        } else {
+            None
+        };
+
         Ok(Utxo {
             nullifiers,
             commitments,
             memos,
             merkle_version,
             merkle_root,
+            audit,
         })
     }
 
@@ -85,11 +114,21 @@ impl UtxoCircuit {
         let merkle_version = self.inputs[0].merkle_proof.version;
         let merkle_root = self.inputs[0].merkle_proof.root;
 
+        let audit = if let Some(audit) = &self.audit {
+            Some(Audit {
+                auditor: audit.auditor,
+                memos: audit.memos.clone(),
+            })
+        } else {
+            None
+        };
+
         Utxo {
             nullifiers,
             commitments,
             merkle_root,
             merkle_version,
+            audit,
             memos: vec![],
         }
     }
@@ -228,6 +267,58 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             input_total.enforce_equal(output_total)?;
         }
 
+        // 8. Prove audit encryption correctness (if audit is enabled)
+        if let Some(audit) = &self.audit {
+            // Allocate auditor public key as witness
+            let auditor_pk_x_var = FpVar::new_input(cs.clone(), || Ok(audit.auditor.x))?;
+            let auditor_pk_y_var = FpVar::new_input(cs.clone(), || Ok(audit.auditor.y))?;
+
+            // Prove encryption for each output
+            for (i, output) in self.outputs.iter().enumerate() {
+                let comm = &output.commitment;
+
+                // Get the ephemeral secret for this output
+                let ephemeral_secret = audit.shares[i];
+                let ephemeral_sk_var = FpVar::new_witness(cs.clone(), || Ok(ephemeral_secret))?;
+
+                // Allocate output fields
+                let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
+                let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
+                let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.x))?;
+                let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.y))?;
+
+                // Compute nullifier for this output
+                let nullifier = comm.nullify(&self.keypair);
+                let nullifier_var = FpVar::new_witness(cs.clone(), || Ok(nullifier))?;
+
+                // Extract ciphertexts from memo bytes
+                // Format: ephemeral_pk (32 bytes) || ciphertexts (4 × 32 bytes)
+                // 4 field elements: [asset_amount_packed, owner_x, owner_y, nullifier]
+                let mut expected_ciphertexts = Vec::new();
+                let memo_bytes = &audit.memos[i];
+                for bytes in memo_bytes[32..].chunks(32) {
+                    // skip pk
+                    let ct = Fr::deserialize_compressed(bytes)
+                        .map_err(|_| SynthesisError::Unsatisfiable)?;
+                    let ct_var = FpVar::new_input(cs.clone(), || Ok(ct))?;
+                    expected_ciphertexts.push(ct_var);
+                }
+
+                // Prove encryption correctness
+                audit_encrypt_gadget(
+                    &ephemeral_sk_var,
+                    &auditor_pk_x_var,
+                    &auditor_pk_y_var,
+                    &asset_var,
+                    &amount_var,
+                    &owner_x_var,
+                    &owner_y_var,
+                    &nullifier_var,
+                    &expected_ciphertexts,
+                )?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -275,6 +366,7 @@ mod tests {
             outputs: vec![UtxoOutput {
                 commitment: output_comm,
             }],
+            audit: None,
         };
 
         // Test constraint satisfaction

@@ -1,12 +1,12 @@
 use crate::{
     AzError, Keypair, PublicKey, Result,
-    audit::{audit_decrypt, audit_encrypt},
+    audit_poseidon::{audit_decrypt_field_elements, audit_encrypt_field_elements},
     memo::{hybrid_decrypt, hybrid_encrypt},
     poseidon::{poseidon_hash, poseidon_merge_hash},
     storage::*,
 };
 use ark_bn254::Fr;
-use ark_ff::{BigInteger, PrimeField};
+use ark_ff::{BigInteger, Field, PrimeField};
 use ark_std::{
     UniformRand, Zero,
     collections::HashMap,
@@ -22,6 +22,39 @@ pub type Commitment = Fr;
 pub type Nullifier = Fr;
 
 pub type Blind = Fr;
+
+/// Pack asset (u64) and amount (u128) into a single field element
+/// Layout: [asset (64 bits) || amount (128 bits)] = 192 bits total < 254 bits (Fr)
+pub fn pack_asset_amount(asset: Asset, amount: Amount) -> Fr {
+    // Compute: asset * 2^128 + amount
+    let asset_fr = Fr::from(asset);
+    let amount_fr = Fr::from(amount);
+    let shift = Fr::from(2u128).pow([128]); // 2^128
+
+    asset_fr * shift + amount_fr
+}
+
+/// Unpack asset (u64) and amount (u128) from a single field element
+pub fn unpack_asset_amount(packed: Fr) -> (Asset, Amount) {
+    let packed_bigint = packed.into_bigint();
+
+    // Extract lower 128 bits for amount
+    // BigInt is little-endian, so first two u64 limbs contain the lower 128 bits
+    let amount_low = packed_bigint.as_ref()[0];
+    let amount_high = packed_bigint.as_ref()[1];
+    let amount = (amount_high as u128) << 64 | (amount_low as u128);
+
+    // Extract upper bits for asset by computing: asset = (packed - amount) / 2^128
+    let amount_fr = Fr::from(amount);
+    let remainder = packed - amount_fr;
+    let shift = Fr::from(2u128).pow([128]); // 2^128
+    let asset_fr = remainder / shift;
+
+    // Convert to u64
+    let asset = asset_fr.into_bigint().as_ref()[0] as u64;
+
+    (asset, amount)
+}
 
 #[derive(Clone)]
 pub struct OpenCommitment {
@@ -108,59 +141,58 @@ impl OpenCommitment {
         Ok(open_comm)
     }
 
+    /// Encrypt audit data using field-element-based encryption (circuit-compatible)
+    ///
+    /// Returns: (ciphertext_bytes, ephemeral_secret_fr)
+    /// Ciphertext format: ephemeral_pk (32 bytes) || ciphertexts (4 × 32 bytes = 128 bytes)
+    /// Field elements: [asset_amount_packed, owner_x, owner_y, nullifier]
     pub fn audit_encrypt<R: CryptoRng + Rng>(
         &self,
         prng: &mut R,
         keypair: &Keypair,
         auditor: &PublicKey,
     ) -> Result<(Vec<u8>, Fr)> {
-        let mut ptext = vec![];
-        ptext.extend(self.asset.to_le_bytes());
-        ptext.extend(self.amount.to_le_bytes());
-
-        ptext.extend(self.owner.x.into_bigint().to_bytes_le());
-        ptext.extend(self.owner.y.into_bigint().to_bytes_le());
-
-        // for freezing
+        // Pack asset and amount into single field element (192 bits < 254 bits)
+        let asset_amount_packed = pack_asset_amount(self.asset, self.amount);
+        let owner_x_fr = self.owner.x;
+        let owner_y_fr = self.owner.y;
         let nullifier = self.nullify(keypair);
-        ptext.extend(nullifier.into_bigint().to_bytes_le());
 
-        audit_encrypt(prng, auditor, &ptext)
+        let field_elements = vec![asset_amount_packed, owner_x_fr, owner_y_fr, nullifier];
+
+        audit_encrypt_field_elements(prng, auditor, &field_elements)
     }
 
+    /// Decrypt audit data using field-element-based decryption (circuit-compatible)
     pub fn audit_decrypt(
         auditor: &Keypair,
         _comm: &Commitment,
         bytes: &[u8],
     ) -> Result<(Self, Fr)> {
-        let ptext = audit_decrypt(auditor, bytes)?;
-        if ptext.len() < 120 {
+        // Decrypt field elements: [asset_amount_packed, owner_x, owner_y, nullifier]
+        let field_elements = audit_decrypt_field_elements(auditor, bytes)?;
+
+        if field_elements.len() != 4 {
             return Err(AzError::Decryption);
         }
 
-        let mut asset_bytes = [0u8; 8];
-        asset_bytes.copy_from_slice(&ptext[..8]);
-        let asset = Asset::from_le_bytes(asset_bytes);
+        let asset_amount_packed = field_elements[0];
+        let owner_x = field_elements[1];
+        let owner_y = field_elements[2];
+        let nullifier = field_elements[3];
 
-        let mut amount_bytes = [0u8; 16];
-        amount_bytes.copy_from_slice(&ptext[8..24]);
-        let amount = Amount::from_le_bytes(amount_bytes);
-
-        let x = Fr::from_le_bytes_mod_order(&ptext[24..56]);
-        let y = Fr::from_le_bytes_mod_order(&ptext[56..88]);
-
-        let nullifier = Fr::from_le_bytes_mod_order(&ptext[88..120]);
+        // Unpack asset and amount from single field element
+        let (asset, amount) = unpack_asset_amount(asset_amount_packed);
 
         let open_comm = OpenCommitment {
             asset,
             amount,
             blind: Fr::zero(),
-            owner: PublicKey { x, y },
+            owner: PublicKey {
+                x: owner_x,
+                y: owner_y,
+            },
         };
-
-        // if &open_comm.commit() != comm {
-        //     return Err(AzError::Decryption);
-        // }
 
         Ok((open_comm, nullifier))
     }
@@ -453,6 +485,36 @@ mod tests {
 
         let proof3 = merkle.generate_proof(9).unwrap();
         assert!(proof3.verify());
+    }
+
+    #[test]
+    fn test_pack_unpack_asset_amount() {
+        // Test edge cases
+        let test_cases = vec![
+            (0u64, 0u128),
+            (1u64, 1u128),
+            (u64::MAX, 0u128),
+            (0u64, u128::MAX),
+            (u64::MAX, u128::MAX),
+            (12345u64, 67890u128),
+            (1u64, 1_000_000_000_000_000u128), // 1 quadrillion
+        ];
+
+        for (asset, amount) in test_cases {
+            let packed = pack_asset_amount(asset, amount);
+            let (unpacked_asset, unpacked_amount) = unpack_asset_amount(packed);
+
+            assert_eq!(
+                asset, unpacked_asset,
+                "Asset mismatch for ({}, {})",
+                asset, amount
+            );
+            assert_eq!(
+                amount, unpacked_amount,
+                "Amount mismatch for ({}, {})",
+                asset, amount
+            );
+        }
     }
 
     #[test]

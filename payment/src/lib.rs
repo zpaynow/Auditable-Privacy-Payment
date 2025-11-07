@@ -1,4 +1,5 @@
-mod audit;
+mod audit_gadget;
+mod audit_poseidon;
 mod commitment;
 mod memo;
 mod merkle_tree;

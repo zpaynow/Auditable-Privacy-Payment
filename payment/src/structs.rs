@@ -1,5 +1,6 @@
 use crate::{
     AzError, Keypair, PublicKey, Result,
+    audit::{audit_decrypt, audit_encrypt},
     memo::{hybrid_decrypt, hybrid_encrypt},
     poseidon::{poseidon_hash, poseidon_merge_hash},
     storage::*,
@@ -67,7 +68,7 @@ impl OpenCommitment {
     }
 
     /// encrypt the memo for receiver
-    pub fn encrypt<R: CryptoRng + Rng>(&self, prng: &mut R) -> Result<Vec<u8>> {
+    pub fn memo_encrypt<R: CryptoRng + Rng>(&self, prng: &mut R) -> Result<Vec<u8>> {
         let mut ptext = vec![];
         ptext.extend(self.asset.to_le_bytes());
         ptext.extend(self.amount.to_le_bytes());
@@ -77,9 +78,9 @@ impl OpenCommitment {
     }
 
     /// decrypt the memo by receiver
-    pub fn decrypt(keypair: &Keypair, comm: &Commitment, bytes: &[u8]) -> Result<Self> {
+    pub fn memo_decrypt(keypair: &Keypair, comm: &Commitment, bytes: &[u8]) -> Result<Self> {
         let ptext = hybrid_decrypt(keypair, bytes)?;
-        if ptext.len() < 32 {
+        if ptext.len() < 56 {
             return Err(AzError::Decryption);
         }
 
@@ -91,7 +92,7 @@ impl OpenCommitment {
         amount_bytes.copy_from_slice(&ptext[8..24]);
         let amount = Amount::from_le_bytes(amount_bytes);
 
-        let blind = Blind::from_le_bytes_mod_order(&ptext[24..]);
+        let blind = Blind::from_le_bytes_mod_order(&ptext[24..56]);
 
         let open_comm = OpenCommitment {
             asset,
@@ -105,6 +106,63 @@ impl OpenCommitment {
         }
 
         Ok(open_comm)
+    }
+
+    pub fn audit_encrypt<R: CryptoRng + Rng>(
+        &self,
+        prng: &mut R,
+        keypair: &Keypair,
+        auditor: &PublicKey,
+    ) -> Result<(Vec<u8>, Fr)> {
+        let mut ptext = vec![];
+        ptext.extend(self.asset.to_le_bytes());
+        ptext.extend(self.amount.to_le_bytes());
+
+        ptext.extend(self.owner.x.into_bigint().to_bytes_le());
+        ptext.extend(self.owner.y.into_bigint().to_bytes_le());
+
+        // for freezing
+        let nullifier = self.nullify(keypair);
+        ptext.extend(nullifier.into_bigint().to_bytes_le());
+
+        audit_encrypt(prng, auditor, &ptext)
+    }
+
+    pub fn audit_decrypt(
+        auditor: &Keypair,
+        _comm: &Commitment,
+        bytes: &[u8],
+    ) -> Result<(Self, Fr)> {
+        let ptext = audit_decrypt(auditor, bytes)?;
+        if ptext.len() < 120 {
+            return Err(AzError::Decryption);
+        }
+
+        let mut asset_bytes = [0u8; 8];
+        asset_bytes.copy_from_slice(&ptext[..8]);
+        let asset = Asset::from_le_bytes(asset_bytes);
+
+        let mut amount_bytes = [0u8; 16];
+        amount_bytes.copy_from_slice(&ptext[8..24]);
+        let amount = Amount::from_le_bytes(amount_bytes);
+
+        let x = Fr::from_le_bytes_mod_order(&ptext[24..56]);
+        let y = Fr::from_le_bytes_mod_order(&ptext[56..88]);
+
+        let nullifier = Fr::from_le_bytes_mod_order(&ptext[88..120]);
+
+        let open_comm = OpenCommitment {
+            asset,
+            amount,
+            blind: Fr::zero(),
+            owner: PublicKey { x, y },
+        };
+
+        // if &open_comm.commit() != comm {
+        //     return Err(AzError::Decryption);
+        // }
+
+        Ok((open_comm, nullifier))
     }
 }
 
@@ -407,11 +465,36 @@ mod tests {
 
         let open_comm = OpenCommitment::generate(rng, asset, amount, keypair.public);
         let comm = open_comm.commit();
-        let memo = open_comm.encrypt(rng).unwrap();
+        let memo = open_comm.memo_encrypt(rng).unwrap();
 
-        let open_comm2 = OpenCommitment::decrypt(&keypair, &comm, &memo).unwrap();
+        let open_comm2 = OpenCommitment::memo_decrypt(&keypair, &comm, &memo).unwrap();
         assert_eq!(open_comm.asset, open_comm2.asset);
         assert_eq!(open_comm.amount, open_comm2.amount);
         assert_eq!(open_comm.blind, open_comm2.blind);
+    }
+
+    #[test]
+    fn test_audit() {
+        let rng = &mut ChaCha20Rng::from_seed([2u8; 32]);
+
+        let keypair = Keypair::generate(rng);
+        let asset = 1;
+        let amount = 100;
+
+        let auditor = Keypair::generate(rng);
+
+        let open_comm = OpenCommitment::generate(rng, asset, amount, keypair.public);
+        let comm = open_comm.commit();
+        let nullifier = open_comm.nullify(&keypair);
+        let (memo, _) = open_comm
+            .audit_encrypt(rng, &keypair, &auditor.public)
+            .unwrap();
+
+        let (open_comm2, nullifier2) =
+            OpenCommitment::audit_decrypt(&auditor, &comm, &memo).unwrap();
+        assert_eq!(open_comm.asset, open_comm2.asset);
+        assert_eq!(open_comm.amount, open_comm2.amount);
+        assert_eq!(open_comm.owner, open_comm2.owner);
+        assert_eq!(nullifier, nullifier2);
     }
 }

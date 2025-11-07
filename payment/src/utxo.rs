@@ -52,7 +52,7 @@ impl UtxoCircuit {
 
         let mut memos = vec![];
         for output in self.outputs.iter() {
-            memos.push(output.commitment.encrypt(prng)?);
+            memos.push(output.commitment.memo_encrypt(prng)?);
         }
 
         let merkle_version = self.inputs[0].merkle_proof.version;

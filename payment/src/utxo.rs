@@ -232,6 +232,7 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
         }
 
         // Process outputs
+        let mut audit_used = Vec::new();
         for (i, output) in self.outputs.iter().enumerate() {
             let comm = &output.commitment;
 
@@ -260,6 +261,14 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
                 FpVar::constant(Fr::from(0u64)),
             ));
             entry.1 = &entry.1 + &amount_var; // Add to output total
+
+            audit_used.push((
+                asset_var,
+                amount_var,
+                owner_x_var,
+                owner_y_var,
+                computed_commitment,
+            ));
         }
 
         // 7. Verify balance: for each asset, inputs == outputs
@@ -275,8 +284,8 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
 
             // Prove encryption for each output
             for (i, output) in self.outputs.iter().enumerate() {
-                let comm = &output.commitment;
                 let memo_bytes = &audit.memos[i];
+                let (asset_var, amount_var, owner_x_var, owner_y_var, _comm_var) = &audit_used[i];
 
                 // Get the ephemeral secret for this output
                 let ephemeral_secret = audit.shares[i];
@@ -295,14 +304,10 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
                 // Prove keypair relationship: pk = sk * G
                 keypair_gadget(&ephemeral_sk_var, &ephemeral_pk_x_var, &ephemeral_pk_y_var)?;
 
-                // Allocate output fields
-                let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
-                let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
-                let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.x))?;
-                let owner_y_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.y))?;
-
                 // Compute nullifier for this output
-                let nullifier = comm.nullify(&self.keypair);
+                // FIXME let nullifier_var = nullifier_gadget(&comm_var, &sk_var)?;
+
+                let nullifier = output.commitment.nullify(&self.keypair);
                 let nullifier_var = FpVar::new_witness(cs.clone(), || Ok(nullifier))?;
 
                 // Extract ciphertexts from memo bytes

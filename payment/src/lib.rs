@@ -12,7 +12,7 @@ mod keys;
 mod storage;
 mod structs;
 
-// pub mod deposit;
+pub mod deposit;
 pub mod transfer;
 pub mod withdraw;
 

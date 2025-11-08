@@ -70,10 +70,10 @@ impl ConstraintSynthesizer<Fr> for WithdrawCircuit {
         // Prove keypair relationship: pk = sk * G
         keypair_gadget(&sk_var, &pk_x_fq_var, &pk_y_fq_var)?;
 
-        // 1. Allocate input commitment fields
+        // Allocate input commitment fields
         let blind_var = FpVar::new_witness(cs.clone(), || Ok(self.input.blind))?;
 
-        // 2. Verify commitment correctness
+        // Verify commitment correctness
         let computed_commitment = commitment_gadget(
             &asset_var,
             &amount_var,
@@ -82,7 +82,7 @@ impl ConstraintSynthesizer<Fr> for WithdrawCircuit {
             &pk_y_fq_var,
         )?;
 
-        // 3. Compute and verify nullifier
+        // Compute and verify nullifier
         let computed_nullifier = nullifier_gadget(&computed_commitment, &sk_var)?;
 
         // Verify nullifier matches public input

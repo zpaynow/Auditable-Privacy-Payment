@@ -1,10 +1,7 @@
 use crate::{
-    Keypair, MTProof, OpenCommitment, PublicKey,
-    audit_gadget::audit_encrypt_gadget,
-    commitment::commitment_gadget,
-    keys::keypair_gadget,
-    merkle_tree::merkle_proof_gadget,
-    nullifier::{freezer_gadget, nullifier_gadget},
+    Keypair, MTProof, OpenCommitment, PublicKey, audit_gadget::audit_encrypt_gadget,
+    commitment::commitment_gadget, keys::keypair_gadget, merkle_tree::merkle_proof_gadget,
+    nullifier::nullifier_gadget,
 };
 use ark_bn254::Fr;
 use ark_r1cs_std::{
@@ -193,11 +190,11 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
         let sk_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(sk_fr))?;
 
         // Public key coordinates in their native Fq field for keypair proof
-        let pk_x_fq_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.x))?;
-        let pk_y_fq_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.y))?;
+        let pk_x_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.x))?;
+        let pk_y_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.y))?;
 
         // Prove keypair relationship: pk = sk * G
-        keypair_gadget(&sk_var, &pk_x_fq_var, &pk_y_fq_var)?;
+        keypair_gadget(&sk_var, &pk_x_var, &pk_y_var)?;
 
         // Track asset balances
         let mut asset_balances: HashMap<u64, (FpVar<Fr>, FpVar<Fr>)> = HashMap::new();
@@ -213,19 +210,14 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             let blind_var = FpVar::new_witness(cs.clone(), || Ok(comm.blind))?;
 
             // 2. Verify commitment correctness
-            let computed_commitment = commitment_gadget(
-                &asset_var,
-                &amount_var,
-                &blind_var,
-                &pk_x_fq_var,
-                &pk_y_fq_var,
-            )?;
+            let computed_commitment =
+                commitment_gadget(&asset_var, &amount_var, &blind_var, &pk_x_var, &pk_y_var)?;
 
             // 3.1 Compute and verify nullifier
             let computed_nullifier = nullifier_gadget(&computed_commitment, &sk_var)?;
 
             // 3.2 Compute and verify freezer
-            let computed_freezer = freezer_gadget(&computed_commitment)?;
+            let computed_freezer = nullifier_gadget(&computed_commitment, &pk_x_var)?;
 
             // Verify nullifier/freezer matches public input
             computed_nullifier.enforce_equal(&nullifiers_vars[i])?;

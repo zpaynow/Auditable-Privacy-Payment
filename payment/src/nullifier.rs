@@ -3,16 +3,10 @@ use ark_bn254::Fr;
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_relations::r1cs::SynthesisError;
 
-/// Circuit gadget for computing nullifier
+/// Circuit gadget for computing nullifier/freezer
 /// Nullifier = Poseidon(comm, sk)
 pub fn nullifier_gadget(comm: &FpVar<Fr>, sk: &FpVar<Fr>) -> Result<FpVar<Fr>, SynthesisError> {
     poseidon_hash_gadget(&[comm.clone(), sk.clone()])
-}
-
-/// Circuit gadget for computing freezer
-/// Nullifier = Poseidon(comm)
-pub fn freezer_gadget(comm: &FpVar<Fr>) -> Result<FpVar<Fr>, SynthesisError> {
-    poseidon_hash_gadget(&[comm.clone()])
 }
 
 #[cfg(test)]

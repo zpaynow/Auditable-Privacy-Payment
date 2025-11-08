@@ -3,7 +3,7 @@ use crate::{
     commitment::commitment_gadget,
     keys::keypair_gadget,
     merkle_tree::merkle_proof_gadget,
-    nullifier::{freezer_gadget, nullifier_gadget},
+    nullifier::nullifier_gadget,
     transfer::{Proof, ProvingKey, VerifyingKey},
 };
 use ark_bn254::{Bn254, Fr};
@@ -68,27 +68,22 @@ impl ConstraintSynthesizer<Fr> for WithdrawCircuit {
         let sk_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(sk_fr))?;
 
         // Public key coordinates in their native Fq field for keypair proof
-        let pk_x_fq_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.x))?;
-        let pk_y_fq_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.y))?;
+        let pk_x_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.x))?;
+        let pk_y_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.keypair.public.y))?;
 
         // Prove keypair relationship: pk = sk * G
-        keypair_gadget(&sk_var, &pk_x_fq_var, &pk_y_fq_var)?;
+        keypair_gadget(&sk_var, &pk_x_var, &pk_y_var)?;
 
         // Allocate input commitment fields
         let blind_var = FpVar::new_witness(cs.clone(), || Ok(self.input.blind))?;
 
         // Verify commitment correctness
-        let computed_commitment = commitment_gadget(
-            &asset_var,
-            &amount_var,
-            &blind_var,
-            &pk_x_fq_var,
-            &pk_y_fq_var,
-        )?;
+        let computed_commitment =
+            commitment_gadget(&asset_var, &amount_var, &blind_var, &pk_x_var, &pk_y_var)?;
 
         // Compute and verify nullifier/freezer
         let computed_nullifier = nullifier_gadget(&computed_commitment, &sk_var)?;
-        let computed_freezer = freezer_gadget(&computed_commitment)?;
+        let computed_freezer = nullifier_gadget(&computed_commitment, &pk_x_var)?;
 
         // Verify nullifier matches public input
         computed_nullifier.enforce_equal(&nullifier_var)?;

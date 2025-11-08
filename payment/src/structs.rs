@@ -101,7 +101,7 @@ impl OpenCommitment {
     }
 
     pub fn freeze(&self) -> Nullifier {
-        poseidon_hash(&[self.commit()])
+        poseidon_hash(&[self.commit(), self.owner.x])
     }
 
     /// encrypt the memo for receiver

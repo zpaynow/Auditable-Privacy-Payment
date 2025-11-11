@@ -12,10 +12,7 @@ use ark_r1cs_std::{
 };
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 use ark_serialize::CanonicalDeserialize;
-use ark_std::{
-    collections::HashMap,
-    rand::{CryptoRng, Rng},
-};
+use ark_std::rand::{CryptoRng, Rng};
 
 /// UTXO transaction circuit
 /// Proves correct spending of inputs and creation of outputs with privacy
@@ -162,6 +159,7 @@ pub struct UtxoOutput {
 
 impl ConstraintSynthesizer<Fr> for UtxoCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        assert!(self.inputs.len() > 0);
         let utxo = self.publics();
 
         // Allocate public inputs
@@ -197,7 +195,10 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
         keypair_gadget(&sk_var, &pk_x_var, &pk_y_var)?;
 
         // Track asset balances
-        let mut asset_balances: HashMap<u64, (FpVar<Fr>, FpVar<Fr>)> = HashMap::new();
+        let asset = self.inputs[0].commitment.asset;
+        let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(asset)))?;
+        let mut input_amount = FpVar::constant(Fr::from(0u64));
+        let mut output_amount = FpVar::constant(Fr::from(0u64));
 
         // Process inputs
         for (i, input) in self.inputs.iter().enumerate() {
@@ -205,7 +206,6 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             let proof = &input.merkle_proof;
 
             // 1. Allocate input commitment fields
-            let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
             let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
             let blind_var = FpVar::new_witness(cs.clone(), || Ok(comm.blind))?;
 
@@ -242,11 +242,7 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             merkle_valid.enforce_equal(&Boolean::TRUE)?;
 
             // 6. Track input amounts by asset
-            let entry = asset_balances.entry(comm.asset).or_insert((
-                FpVar::constant(Fr::from(0u64)),
-                FpVar::constant(Fr::from(0u64)),
-            ));
-            entry.0 = &entry.0 + &amount_var; // Add to input total
+            input_amount += &amount_var;
         }
 
         // Process outputs
@@ -255,7 +251,6 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             let comm = &output.commitment;
 
             // 1. Allocate output commitment fields
-            let asset_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.asset)))?;
             let amount_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(comm.amount)))?;
             let blind_var = FpVar::new_witness(cs.clone(), || Ok(comm.blind))?;
             let owner_x_var = FpVar::new_witness(cs.clone(), || Ok(comm.owner.x))?;
@@ -274,14 +269,9 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             computed_commitment.enforce_equal(&commitments_vars[i])?;
 
             // 4. Track output amounts by asset
-            let entry = asset_balances.entry(comm.asset).or_insert((
-                FpVar::constant(Fr::from(0u64)),
-                FpVar::constant(Fr::from(0u64)),
-            ));
-            entry.1 = &entry.1 + &amount_var; // Add to output total
+            output_amount += &amount_var;
 
             audit_used.push((
-                asset_var,
                 amount_var,
                 owner_x_var,
                 owner_y_var,
@@ -290,9 +280,7 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
         }
 
         // 7. Verify balance: for each asset, inputs == outputs
-        for (_asset, (input_total, output_total)) in asset_balances.iter() {
-            input_total.enforce_equal(output_total)?;
-        }
+        input_amount.enforce_equal(&output_amount)?;
 
         // 8. Prove audit encryption correctness (if audit is enabled)
         if let Some(audit) = &self.audit {
@@ -303,7 +291,7 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             // Prove encryption for each output
             for i in 0..self.outputs.len() {
                 let memo_bytes = &audit.memos[i];
-                let (asset_var, amount_var, owner_x_var, owner_y_var, _comm_var) = &audit_used[i];
+                let (amount_var, owner_x_var, owner_y_var, _comm_var) = &audit_used[i];
 
                 // Get the ephemeral secret for this output
                 let ephemeral_secret = audit.shares[i];

@@ -45,11 +45,13 @@ const hi = (n: bigint) => n >> 64n
 
 const wasmReady = init()
 const keyCache = new Map<string, Promise<Uint8Array>>()
+// where the proving keys live: same origin (/keys) by default, or a CDN / R2 bucket via VITE_KEYS_URL
+const KEYS_URL: string = ((import.meta.env.VITE_KEYS_URL as string | undefined) ?? '/keys').replace(/\/$/, '')
 
 function loadKey(name: string): Promise<Uint8Array> {
   let p = keyCache.get(name)
   if (!p) {
-    p = fetch(`/keys/${name}.pk`).then(async (r) => {
+    p = fetch(`${KEYS_URL}/${name}.pk`).then(async (r) => {
       if (!r.ok) throw new Error(`failed to fetch proving key ${name}: ${r.status}`)
       return new Uint8Array(await r.arrayBuffer())
     })

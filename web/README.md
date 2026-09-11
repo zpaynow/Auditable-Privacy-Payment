@@ -55,6 +55,36 @@ AGGREGATOR_SECRET=0x… node scripts/e2e-aggregator.mjs # via the running aggreg
 ADMIN_TOKEN=dev node scripts/e2e-auditor.mjs          # sync through the auditor service
 ```
 
+## Deploy to Cloudflare Pages
+
+The build needs the generated inputs (`src/wasm`, `src/abi`, `src/deployments`, `public/keys`),
+which come from the Rust toolchain via `scripts/sync.sh`. Pages' build image has no Rust /
+wasm-pack / forge, so build locally and upload `dist`:
+
+```sh
+./scripts/sync.sh                                   # after the Base Sepolia deploy
+cp .env.example .env.production                     # set VITE_AGGREGATOR_URL / VITE_AUDITOR_URL (https!)
+npx wrangler login
+npx wrangler pages project create app-web --production-branch main   # once
+npm run deploy                                      # = vite build + wrangler pages deploy dist
+```
+
+Settings that matter:
+
+| what | value |
+| --- | --- |
+| `VITE_AGGREGATOR_URL`, `VITE_AUDITOR_URL` | public **https** URLs of the two services (a Pages site is https; http calls are blocked as mixed content). Put them behind Cloudflare Tunnel, Caddy or nginx with TLS. Both services already send permissive CORS. |
+| `VITE_KEYS_URL` | leave `/keys` to ship the ~50 MB of proving keys with the site (every file is under Pages' 25 MiB limit; `public/_headers` marks them immutable). Or upload `artifacts/*.pk` to an R2 bucket with a public domain and CORS for the site origin, and set the bucket URL here. |
+| `src/deployments/84532.json` | present after `sync.sh`; the app only offers chains that have a deployment file |
+| Node | 22+ (Vite 8) if you ever build on Pages' side |
+
+Git-integrated builds are possible only if you commit the generated inputs (`src/wasm`,
+`src/abi`, `src/deployments`; keys via R2), set root directory `web`, build command
+`npm ci && npm run build`, output `dist`, and the `VITE_*` variables in the project settings.
+
+The dev wallet (`?dev=` / `?devkey=`) targets a local anvil and is irrelevant in production;
+users connect MetaMask on Base Sepolia.
+
 ## Testnet
 
 Deploy with a funded key (`--private-key`) and the testnet RPC (see `solidity/README.md`), then

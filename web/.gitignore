@@ -28,3 +28,5 @@ src/wasm/
 public/keys/
 src/abi/
 src/deployments/
+.env.production
+.env.local

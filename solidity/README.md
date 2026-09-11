@@ -1,66 +1,66 @@
-## Foundry
+# APP contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Foundry project. `src/APP.sol` is the pool; `src/PoseidonT3.sol` and `src/verifiers/*.sol` are
+generated from the Rust side and must not be edited by hand.
 
-Foundry consists of:
-
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
+```
+src/
+  APP.sol                   pool: deposit / transfer / transfer1 / withdraw / freeze
+  IncrementalMerkleTree.sol depth-20 Poseidon tree + 128-root history (mirrors Rust MerkleTree)
+  PoseidonT3.sol            generated: cargo run -p app-tools -- poseidon-sol
+  TestToken.sol             mintable faucet ERC20 for testnets
+  verifiers/                generated: cargo run -p app-tools -- setup
+test/fixtures/              generated: setup / poseidon-sol / e2e (real proofs from Rust)
+script/Deploy.s.sol         deploys everything, writes deployments/<chainId>.json
 ```
 
-### Test
+## Regenerate + test
 
-```shell
-$ forge test
+```sh
+cargo run -p app-tools -- setup          # keys -> ../artifacts, verifiers, fixtures
+cargo run -p app-tools -- poseidon-sol   # PoseidonT3.sol + vectors
+cargo run -p app-tools -- e2e            # coherent deposit->transfer->withdraw fixture
+forge test
 ```
 
-### Format
+## Deploy
 
-```shell
-$ forge fmt
-```
+1. Auditor key (keep the secret offline; the web Auditor tab needs it):
 
-### Gas Snapshots
+   ```sh
+   cargo run -p app-tools -- keygen
+   ```
 
-```shell
-$ forge snapshot
-```
+2. Local anvil:
 
-### Anvil
+   ```sh
+   anvil
+   AUDITOR_X=0x… AUDITOR_Y=0x… forge script script/Deploy.s.sol \
+     --rpc-url http://127.0.0.1:8545 --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 --broadcast
+   ```
 
-```shell
-$ anvil
-```
+3. Base Sepolia (deployer needs ~0.02 ETH; the script uses ~10M gas):
 
-### Deploy
+   ```sh
+   export PK=0x…                       # funded deployer key
+   export AUDITOR_X=0x… AUDITOR_Y=0x…  # from keygen
+   # optional: AUDITOR_ADMIN=0x… (address allowed to freeze, default deployer)
+   # optional: TOKEN=0x…             (register an existing ERC20 instead of deploying TestToken)
+   forge script script/Deploy.s.sol --rpc-url https://sepolia.base.org --private-key $PK --broadcast
+   # verify sources (optional):
+   #   forge script … --verify --etherscan-api-key $BASESCAN_KEY
+   ```
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+   Output: `deployments/84532.json`. Then `cd ../web && ./scripts/sync.sh` so the web app picks
+   up the addresses. Anyone with the same `app-tools setup` seed gets identical proving keys, so
+   `web/public/keys` always matches the deployed verifiers.
 
-### Cast
+## Gas (via-IR, from tests)
 
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+| operation | gas |
+| --- | --- |
+| deposit | 1.3M–1.7M |
+| transfer 2-in/2-out | 2.3M |
+| transfer 1-in/2-out | 2.3M |
+| withdraw | 0.33M |
+| PoseidonT3.hash | 80k |

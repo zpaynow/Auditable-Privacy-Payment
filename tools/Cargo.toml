@@ -1,0 +1,18 @@
+[package]
+name = "app-tools"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "app-tools"
+path = "src/main.rs"
+
+[dependencies]
+app-payment = { path = "../payment" }
+ark-bn254.workspace = true
+ark-ff.workspace = true
+ark-std.workspace = true
+ark-serialize.workspace = true
+rand_chacha.workspace = true
+sha2.workspace = true
+getrandom = "0.2"

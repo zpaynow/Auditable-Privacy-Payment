@@ -1,5 +1,5 @@
 [workspace]
-members = [ "payment", "aggregator", "auditor"]
+members = [ "payment", "aggregator", "auditor", "wasm", "tools"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -1,7 +1,7 @@
 use ark_bn254::Fr;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ed_on_bn254::{EdwardsAffine, EdwardsConfig, Fr as EdFr};
-use ark_ff::{Field, PrimeField};
+use ark_ff::PrimeField;
 use ark_r1cs_std::{
     R1CSVar,
     alloc::AllocVar,
@@ -15,6 +15,7 @@ use ark_std::{
     UniformRand,
     rand::{CryptoRng, Rng},
 };
+use sha2::{Digest, Sha512};
 
 /// BabyJubjub: PublicKey to receive the amount
 pub type PublicKey = EdwardsAffine;
@@ -36,8 +37,27 @@ impl Keypair {
         Self::from_secret(secret)
     }
 
+    /// Derive a keypair from arbitrary seed bytes (e.g. a wallet signature).
+    /// The seed is hashed and reduced modulo the BabyJubJub scalar field, so any
+    /// non-empty seed yields a valid key.
     pub fn from_seed(seed: &[u8]) -> crate::Result<Keypair> {
-        let secret = EdFr::from_random_bytes(seed).ok_or(crate::AzError::KeypairInvalidSeed)?;
+        if seed.is_empty() {
+            return Err(crate::AzError::KeypairInvalidSeed);
+        }
+        let mut hasher = Sha512::new();
+        hasher.update(b"APP-keypair-v1");
+        hasher.update(seed);
+        let digest = hasher.finalize();
+        let secret = EdFr::from_le_bytes_mod_order(&digest);
+        Ok(Self::from_secret(secret))
+    }
+
+    /// Restore a keypair from a canonical 32-byte little-endian secret scalar.
+    pub fn from_secret_bytes(bytes: &[u8]) -> crate::Result<Keypair> {
+        if bytes.len() != 32 {
+            return Err(crate::AzError::KeypairInvalidSeed);
+        }
+        let secret = EdFr::from_le_bytes_mod_order(bytes);
         Ok(Self::from_secret(secret))
     }
 
@@ -102,8 +122,21 @@ mod tests {
     use super::*;
     use ark_r1cs_std::R1CSVar;
     use ark_relations::r1cs::ConstraintSystem;
-    use ark_std::rand::SeedableRng;
+    use ark_std::rand::{RngCore, SeedableRng};
     use rand_chacha::ChaCha20Rng;
+
+    #[test]
+    fn test_from_seed_never_fails() {
+        let rng = &mut ChaCha20Rng::from_seed([7u8; 32]);
+        for _ in 0..10_000 {
+            let mut seed = [0u8; 32];
+            rng.fill_bytes(&mut seed);
+            let kp = Keypair::from_seed(&seed).unwrap();
+            // deterministic
+            assert_eq!(kp.public, Keypair::from_seed(&seed).unwrap().public);
+        }
+        assert!(Keypair::from_seed(&[]).is_err());
+    }
 
     #[test]
     fn test_keypair_gadget_valid() {

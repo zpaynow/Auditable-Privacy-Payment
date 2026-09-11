@@ -20,6 +20,10 @@ pub struct WithdrawCircuit {
     pub keypair: Keypair,
     pub asset: Asset,
     pub amount: Amount,
+    /// recipient of the withdrawn funds (e.g. an EVM address encoded as a field element)
+    pub recipient: Fr,
+    /// fee paid to the relayer/aggregator out of `amount`
+    pub fee: Amount,
     pub input: OpenCommitment,
     pub merkle_proof: MTProof,
 }
@@ -29,6 +33,8 @@ pub struct WithdrawCircuit {
 pub struct Withdraw {
     pub asset: Asset,
     pub amount: Amount,
+    pub recipient: Fr,
+    pub fee: Amount,
     pub nullifier: Nullifier,
     pub freezer: Nullifier,
     pub merkle_version: u32,
@@ -37,7 +43,7 @@ pub struct Withdraw {
 
 impl WithdrawCircuit {
     /// generate public inputs/withdraw
-    pub(crate) fn withdraw(&self) -> Withdraw {
+    pub fn withdraw(&self) -> Withdraw {
         let nullifier = self.input.nullify(&self.keypair);
         let freezer = self.input.freeze();
 
@@ -46,6 +52,8 @@ impl WithdrawCircuit {
             freezer,
             asset: self.asset,
             amount: self.amount,
+            recipient: self.recipient,
+            fee: self.fee,
             merkle_version: self.merkle_proof.version,
             merkle_root: self.merkle_proof.root,
         }
@@ -62,6 +70,15 @@ impl ConstraintSynthesizer<Fr> for WithdrawCircuit {
         let nullifier_var = FpVar::new_input(cs.clone(), || Ok(utxo.nullifier))?;
         let freezer_var = FpVar::new_input(cs.clone(), || Ok(utxo.freezer))?;
         let merkle_root_var = FpVar::new_input(cs.clone(), || Ok(utxo.merkle_root))?;
+        let recipient_var = FpVar::new_input(cs.clone(), || Ok(utxo.recipient))?;
+        let fee_var = FpVar::new_input(cs.clone(), || Ok(Fr::from(utxo.fee)))?;
+
+        // Bind recipient and fee to the proof. Groth16 does not bind a public input that
+        // appears in no constraint, so tie each one to a witness copy.
+        let recipient_w = FpVar::new_witness(cs.clone(), || Ok(utxo.recipient))?;
+        recipient_var.enforce_equal(&recipient_w)?;
+        let fee_w = FpVar::new_witness(cs.clone(), || Ok(Fr::from(utxo.fee)))?;
+        fee_var.enforce_equal(&fee_w)?;
 
         // Allocate private witness data
         let sk_fr = self.keypair.secret_to_fq();
@@ -141,6 +158,8 @@ pub fn setup<R: Rng + CryptoRng>(rng: &mut R) -> crate::Result<(ProvingKey, Veri
         keypair,
         asset: 1,
         amount: 1,
+        recipient: Fr::from(0u64),
+        fee: 0,
         input,
         merkle_proof,
     };
@@ -169,6 +188,8 @@ pub fn verify(vk: &VerifyingKey, utxo: &Withdraw, proof: &Proof) -> crate::Resul
     publics.push(utxo.nullifier);
     publics.push(utxo.freezer);
     publics.push(utxo.merkle_root);
+    publics.push(utxo.recipient);
+    publics.push(Fr::from(utxo.fee));
 
     let res = Groth16::<Bn254>::verify(vk, &publics, proof).map_err(|_| AzError::Groth16Verify)?;
 
@@ -228,10 +249,13 @@ mod tests {
         );
 
         // Create circuit
+        let recipient = Fr::from(0xdead_beefu64);
         let circuit = WithdrawCircuit {
             keypair,
             asset,
             amount,
+            recipient,
+            fee: 3,
             input,
             merkle_proof,
         };
@@ -244,5 +268,14 @@ mod tests {
 
         // Verify
         verify(&vk, &utxo, &proof).unwrap();
+
+        // A different recipient or fee must not verify (front-running protection)
+        let mut stolen = utxo.clone();
+        stolen.recipient = Fr::from(0xbad_u64);
+        assert!(verify(&vk, &stolen, &proof).is_err());
+
+        let mut refee = utxo.clone();
+        refee.fee = 4;
+        assert!(verify(&vk, &refee, &proof).is_err());
     }
 }

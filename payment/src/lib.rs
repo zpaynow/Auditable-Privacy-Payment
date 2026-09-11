@@ -4,7 +4,7 @@ mod commitment;
 mod memo;
 mod merkle_tree;
 mod nullifier;
-mod poseidon;
+pub mod poseidon;
 mod utxo;
 
 mod error;
@@ -13,6 +13,7 @@ mod storage;
 mod structs;
 
 pub mod deposit;
+pub mod evm;
 pub mod transfer;
 pub mod withdraw;
 

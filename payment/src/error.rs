@@ -13,4 +13,5 @@ pub enum AzError {
     Groth16Verify,
     Encryption,
     Decryption,
+    EvmEncoding,
 }

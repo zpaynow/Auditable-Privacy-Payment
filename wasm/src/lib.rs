@@ -691,16 +691,7 @@ fn parse_mt_proof(bytes: &[u8]) -> std::result::Result<MTProof, JsValue> {
 }
 
 fn serialize_mt_proof(p: &MTProof) -> Vec<u8> {
-    let mut out = Vec::with_capacity(MT_PROOF_LEN);
-    for n in &p.nodes {
-        out.extend(fr_bytes(&n.left));
-        out.extend(fr_bytes(&n.right));
-    }
-    out.extend(fr_bytes(&p.root));
-    out.extend(p.version.to_le_bytes());
-    out.extend(p.index.to_le_bytes());
-    out.extend(p.ledger.to_le_bytes());
-    out
+    p.to_bytes()
 }
 
 // =============================================================================
@@ -1010,4 +1001,22 @@ pub fn freezer_of(commitment: &[u8], owner_x: &[u8]) -> std::result::Result<Vec<
     let c = parse_fr(commitment, "commitment")?;
     let x = parse_fr(owner_x, "owner_x")?;
     Ok(fr_bytes(&app_payment::poseidon::poseidon_hash(&[c, x])))
+}
+
+// =============================================================================
+// Authentication with the payment key (Schnorr on BabyJubJub)
+// =============================================================================
+
+/// Sign `msg` with the payment secret. Returns 64 bytes: R (32) || s (32).
+#[wasm_bindgen]
+pub fn sign_message(secret: &[u8], msg: &[u8]) -> std::result::Result<Vec<u8>, JsValue> {
+    let kp = Keypair::from_secret_bytes(secret).map_err(js_err("secret"))?;
+    Ok(kp.sign(msg).to_vec())
+}
+
+/// Verify a signature made with `sign_message` by the holder of `pk` (64 bytes x || y).
+#[wasm_bindgen]
+pub fn verify_message(pk: &[u8], msg: &[u8], sig: &[u8]) -> std::result::Result<bool, JsValue> {
+    let pk = parse_pk(pk)?;
+    Ok(app_payment::verify_signature(&pk, msg, sig))
 }

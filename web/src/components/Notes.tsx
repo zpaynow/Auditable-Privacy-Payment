@@ -38,7 +38,13 @@ export function Notes({
       <header>
         <h2>Shielded balance</h2>
         <span className={`pill ${syncError ? 'crit' : syncing ? 'warn' : 'ok'}`}>
-          {syncError ? 'sync error' : syncing ? 'syncing…' : sync ? `synced · block ${sync.lastBlock}` : 'not synced'}
+          {syncError
+            ? 'sync error'
+            : syncing
+              ? 'syncing…'
+              : sync
+                ? `${sync.mode === 'auditor' ? 'via auditor service' : 'from chain'} · block ${sync.lastBlock}`
+                : 'not synced'}
         </span>
       </header>
 

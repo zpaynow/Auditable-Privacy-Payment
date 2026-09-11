@@ -57,6 +57,32 @@ contract TransferVerifier {
 
     uint256 public constant NUM_INPUTS = 15;
 
+    /// @notice Verifying key as flat words for batch verification:
+    ///         [alpha.x, alpha.y, beta(4), gamma(4), delta(4), IC0.x, IC0.y, IC1.x, IC1.y, …]
+    function vkPoints() external pure returns (uint256[] memory p) {
+        p = new uint256[](14 + 2 * (NUM_INPUTS + 1));
+        p[0] = alphax; p[1] = alphay;
+        p[2] = betax1; p[3] = betax2; p[4] = betay1; p[5] = betay2;
+        p[6] = gammax1; p[7] = gammax2; p[8] = gammay1; p[9] = gammay2;
+        p[10] = deltax1; p[11] = deltax2; p[12] = deltay1; p[13] = deltay2;
+        p[14] = IC0x; p[15] = IC0y;
+        p[16] = IC1x; p[17] = IC1y;
+        p[18] = IC2x; p[19] = IC2y;
+        p[20] = IC3x; p[21] = IC3y;
+        p[22] = IC4x; p[23] = IC4y;
+        p[24] = IC5x; p[25] = IC5y;
+        p[26] = IC6x; p[27] = IC6y;
+        p[28] = IC7x; p[29] = IC7y;
+        p[30] = IC8x; p[31] = IC8y;
+        p[32] = IC9x; p[33] = IC9y;
+        p[34] = IC10x; p[35] = IC10y;
+        p[36] = IC11x; p[37] = IC11y;
+        p[38] = IC12x; p[39] = IC12y;
+        p[40] = IC13x; p[41] = IC13y;
+        p[42] = IC14x; p[43] = IC14y;
+        p[44] = IC15x; p[45] = IC15y;
+    }
+
     /// @dev proof = [A.x, A.y, B.x1, B.x2, B.y1, B.y2, C.x, C.y]
     function verifyProof(uint256[8] calldata proof, uint256[15] calldata pubSignals) public view returns (bool) {
         assembly {

@@ -22,6 +22,8 @@ mkdir -p "$WEB/src/abi"
 for c in APP TestToken; do
   node -e "const a=require('$ROOT/solidity/out/$c.sol/$c.json');require('fs').writeFileSync('$WEB/src/abi/$c.json',JSON.stringify(a.abi,null,1))"
 done
+cp "$WEB/src/abi/APP.json" "$ROOT/aggregator/abi/APP.json"
+cp "$WEB/src/abi/APP.json" "$ROOT/auditor/abi/APP.json"
 
 echo "• copying deployments"
 mkdir -p "$WEB/src/deployments"

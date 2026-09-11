@@ -211,3 +211,87 @@ mod tests {
         assert_eq!(pk_y_var.value().unwrap(), expected_pk.y);
     }
 }
+
+// =============================================================================
+// Schnorr signatures on BabyJubJub (used to authenticate to services with a payment key)
+// =============================================================================
+
+/// Schnorr signature: R (compressed point, 32 bytes) || s (scalar, 32 bytes LE).
+pub const SIGNATURE_LEN: usize = 64;
+
+fn schnorr_challenge(r: &PublicKey, pk: &PublicKey, msg: &[u8]) -> EdFr {
+    use ark_serialize::CanonicalSerialize;
+    let mut h = Sha512::new();
+    h.update(b"APP-schnorr-babyjubjub-v1");
+    let mut buf = vec![];
+    r.serialize_compressed(&mut buf).expect("point");
+    h.update(&buf);
+    buf.clear();
+    pk.serialize_compressed(&mut buf).expect("point");
+    h.update(&buf);
+    h.update((msg.len() as u64).to_le_bytes());
+    h.update(msg);
+    EdFr::from_le_bytes_mod_order(&h.finalize())
+}
+
+impl Keypair {
+    /// Deterministic Schnorr signature over `msg` (nonce derived from secret and message).
+    pub fn sign(&self, msg: &[u8]) -> [u8; SIGNATURE_LEN] {
+        use ark_serialize::CanonicalSerialize;
+        let mut h = Sha512::new();
+        h.update(b"APP-schnorr-nonce-v1");
+        let mut sk = vec![];
+        self.secret.serialize_compressed(&mut sk).expect("scalar");
+        h.update(&sk);
+        h.update(msg);
+        let k = EdFr::from_le_bytes_mod_order(&h.finalize());
+        let r = (EdwardsAffine::generator() * k).into_affine();
+        let e = schnorr_challenge(&r, &self.public, msg);
+        let s = k + e * self.secret;
+        let mut out = [0u8; SIGNATURE_LEN];
+        r.serialize_compressed(&mut out[..32]).expect("point");
+        s.serialize_compressed(&mut out[32..]).expect("scalar");
+        out
+    }
+}
+
+/// Verify a Schnorr signature made by `pk` over `msg`.
+pub fn verify_signature(pk: &PublicKey, msg: &[u8], sig: &[u8]) -> bool {
+    use ark_serialize::CanonicalDeserialize;
+    if sig.len() != SIGNATURE_LEN {
+        return false;
+    }
+    let Ok(r) = EdwardsAffine::deserialize_compressed(&sig[..32]) else { return false };
+    let Ok(s) = EdFr::deserialize_compressed(&sig[32..]) else { return false };
+    if !pk.is_on_curve() || !pk.is_in_correct_subgroup_assuming_on_curve() {
+        return false;
+    }
+    let e = schnorr_challenge(&r, pk, msg);
+    let lhs = EdwardsAffine::generator() * s;
+    let rhs = r + *pk * e;
+    lhs.into_affine() == rhs.into_affine()
+}
+
+#[cfg(test)]
+mod schnorr_tests {
+    use super::*;
+    use ark_std::rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+
+    #[test]
+    fn test_sign_verify() {
+        let rng = &mut ChaCha20Rng::from_seed([9u8; 32]);
+        let kp = Keypair::generate(rng);
+        let other = Keypair::generate(rng);
+        let sig = kp.sign(b"hello");
+        assert!(verify_signature(&kp.public, b"hello", &sig));
+        assert!(!verify_signature(&kp.public, b"hellp", &sig));
+        assert!(!verify_signature(&other.public, b"hello", &sig));
+        let mut bad = sig;
+        bad[40] ^= 1;
+        assert!(!verify_signature(&kp.public, b"hello", &bad));
+        assert!(!verify_signature(&kp.public, b"hello", &sig[..63]));
+        // deterministic
+        assert_eq!(kp.sign(b"hello"), sig);
+    }
+}

@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { isAddress } from 'viem'
 import type { Hex } from '../lib/encoding'
 import { formatAmount, short } from '../lib/encoding'
-import { withdraw } from '../lib/tx'
-import type { ShieldedWallet, SyncState } from '../lib/sync'
+import { withdraw, withdrawViaAggregator } from '../lib/tx'
+import { useAggregator } from './useAggregator'
+import type { NoteSource, SyncState } from '../lib/sync'
 import type { LogLine } from './Activity'
 import { useOp } from './useOp'
 
@@ -18,14 +19,18 @@ export function WithdrawForm({
   onDone,
 }: {
   ctx: Ctx
-  wallet: ShieldedWallet
+  wallet: NoteSource
   sync: SyncState | null
   onLog: (t: string, l?: LogLine['level']) => void
   onDone: (h: Hex) => void
 }) {
   const [recipient, setRecipient] = useState<string>(ctx.account)
   const [selected, setSelected] = useState<number | null>(null)
+  const [viaAgg, setViaAgg] = useState(false)
   const { busy, step, run } = useOp(onLog)
+  const agg = useAggregator(ctx.publicClient.chain?.id ?? 0)
+  const useAgg = viaAgg && agg.info !== null
+  const aggFee = agg.info ? BigInt(agg.info.withdraw_fee) : 0n
   const live = sync?.utxos.filter((u) => !u.spent && !u.frozen) ?? []
   const note = live.find((u) => u.index === selected) ?? null
 
@@ -39,7 +44,9 @@ export function WithdrawForm({
       onLog('Recipient must be an EVM address', 'err')
       return
     }
-    const h = await run('Withdraw', (p) => withdraw(ctx, wallet, note, recipient as Hex, p))
+    const h = await run(useAgg ? 'Withdraw via aggregator' : 'Withdraw', (p) =>
+      useAgg ? withdrawViaAggregator(ctx, wallet, note, recipient as Hex, agg.info!, p) : withdraw(ctx, wallet, note, recipient as Hex, p),
+    )
     if (h) {
       onDone(h)
       setSelected(null)
@@ -80,13 +87,21 @@ export function WithdrawForm({
           </table>
         )}
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input id="withdraw-via-agg" type="checkbox" style={{ width: 'auto' }} checked={useAgg} disabled={!agg.info} onChange={(e) => setViaAgg(e.target.checked)} />
+        <span>
+          Withdraw through the aggregator: no wallet transaction, fee{' '}
+          {agg.info ? `${formatAmount(aggFee, DECIMALS)} tUSD deducted from the note` : 'unavailable'}
+          {agg.error && <span style={{ color: 'var(--ink-3)' }}> ({agg.error})</span>}
+        </span>
+      </label>
       <div className="row">
         <label>
           <span>Recipient address</span>
           <input id="withdraw-recipient" className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} spellCheck={false} />
         </label>
         <button className="primary" type="submit" disabled={busy || !note}>
-          {busy ? 'Working…' : note ? `Withdraw ${formatAmount(note.amount, DECIMALS)} tUSD` : 'Withdraw'}
+          {busy ? 'Working…' : note ? `Withdraw ${formatAmount(useAgg ? note.amount - aggFee : note.amount, DECIMALS)} tUSD` : 'Withdraw'}
         </button>
       </div>
       {step && (

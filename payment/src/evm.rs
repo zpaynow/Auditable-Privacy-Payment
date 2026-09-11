@@ -158,6 +158,11 @@ pub fn vk_to_solidity(vk: &VerifyingKey, contract_name: &str) -> String {
         ));
     }
 
+    let mut icpoints = String::new();
+    for i in 0..=n {
+        icpoints.push_str(&format!("        p[{}] = IC{i}x; p[{}] = IC{i}y;\n", 14 + 2 * i, 15 + 2 * i));
+    }
+
     // vk_x = IC0 + sum(input[i-1] * ICi)
     let mut vkx = String::new();
     for i in 1..=n {
@@ -194,6 +199,16 @@ contract {contract_name} {{
 
 {ic}
     uint256 public constant NUM_INPUTS = {n};
+
+    /// @notice Verifying key as flat words for batch verification:
+    ///         [alpha.x, alpha.y, beta(4), gamma(4), delta(4), IC0.x, IC0.y, IC1.x, IC1.y, …]
+    function vkPoints() external pure returns (uint256[] memory p) {{
+        p = new uint256[](14 + 2 * (NUM_INPUTS + 1));
+        p[0] = alphax; p[1] = alphay;
+        p[2] = betax1; p[3] = betax2; p[4] = betay1; p[5] = betay2;
+        p[6] = gammax1; p[7] = gammax2; p[8] = gammay1; p[9] = gammay2;
+        p[10] = deltax1; p[11] = deltax2; p[12] = deltay1; p[13] = deltay2;
+{icpoints}    }}
 
     /// @dev proof = [A.x, A.y, B.x1, B.x2, B.y1, B.y2, C.x, C.y]
     function verifyProof(uint256[8] calldata proof, uint256[{n}] calldata pubSignals) public view returns (bool) {{
@@ -294,6 +309,7 @@ contract {contract_name} {{
         dx2 = hex32(&delta[1]),
         dy1 = hex32(&delta[2]),
         dy2 = hex32(&delta[3]),
+        icpoints = icpoints,
         check_fields = (0..n)
             .map(|i| format!("checkField(calldataload(add(pubSignals, {})))", i * 32))
             .collect::<Vec<_>>()

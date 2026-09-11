@@ -16,7 +16,7 @@ export type ProveRequest =
     }
   | {
       kind: 'transfer'
-      shape: '2x2' | '1x2'
+      shape: '2x2' | '1x2' | '2x3' | '1x3'
       secret: Uint8Array
       inputs: Uint8Array
       outputs: Uint8Array
@@ -84,7 +84,7 @@ async function prove(req: ProveRequest): Promise<unknown> {
       return { proofEvm: w.proof_to_evm(proof) }
     }
     case 'transfer': {
-      const pk = await loadKey(req.shape === '2x2' ? 'transfer_2x2' : 'transfer_1x2')
+      const pk = await loadKey(`transfer_${req.shape}`)
       return w.transfer_prove(pk, req.secret, req.inputs, req.outputs, req.auditorPk, req.auditMemos, seed())
     }
     case 'withdraw': {

@@ -3,7 +3,8 @@ import { useAccount, useChainId, useConnect, useDisconnect, usePublicClient, use
 import type { Hex } from './lib/encoding'
 import { deployments, ZK_KEY_MESSAGE, chains } from './lib/config'
 import { forgetKey, keyFromSeed, recallKey, rememberKey, type ZkKey } from './lib/keys'
-import { ShieldedWallet, type SyncState } from './lib/sync'
+import { RemoteWallet, ShieldedWallet, type NoteSource, type SyncState } from './lib/sync'
+import { getStatus } from './lib/auditorClient'
 import { warmProver } from './lib/prover'
 import { hexToBytes, short } from './lib/encoding'
 import { Notes } from './components/Notes'
@@ -28,7 +29,7 @@ export default function App() {
   const deployment = deployments[chainId]
   const [key, setKey] = useState<ZkKey | null>(null)
   const [deriving, setDeriving] = useState(false)
-  const walletRef = useRef<ShieldedWallet | null>(null)
+  const walletRef = useRef<NoteSource | null>(null)
   const [sync, setSync] = useState<SyncState | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -44,14 +45,33 @@ export default function App() {
     recallKey().then((k) => k && setKey(k))
   }, [])
 
-  // (re)create the shielded wallet whenever key / chain / contract changes
+  // (re)create the wallet whenever key / chain / contract changes: prefer the auditor service
+  // (no chain scan, no local tree), fall back to scanning the chain ourselves
+  const [sourceReady, setSourceReady] = useState(0)
   useEffect(() => {
     walletRef.current = null
     setSync(null)
     setSyncError(null)
     if (!key || !publicClient || !deployment) return
-    walletRef.current = new ShieldedWallet(publicClient, deployment.app, key, deployment.deployBlock)
-  }, [key, publicClient, deployment])
+    let alive = true
+    getStatus()
+      .then((st) => {
+        if (!alive) return
+        if (st.chain_id === chainId && st.app.toLowerCase() === deployment.app.toLowerCase()) {
+          walletRef.current = new RemoteWallet(key, chainId, deployment.app)
+        } else {
+          walletRef.current = new ShieldedWallet(publicClient, deployment.app, key, deployment.deployBlock)
+        }
+      })
+      .catch(() => {
+        if (!alive) return
+        walletRef.current = new ShieldedWallet(publicClient, deployment.app, key, deployment.deployBlock)
+      })
+      .finally(() => alive && setSourceReady((n) => n + 1))
+    return () => {
+      alive = false
+    }
+  }, [key, publicClient, deployment, chainId])
 
   const doSync = useCallback(async () => {
     const w = walletRef.current
@@ -74,7 +94,7 @@ export default function App() {
     const id = setInterval(() => void doSync(), 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, deployment, publicClient])
+  }, [sourceReady])
 
   const deriveKey = async () => {
     if (!deployment) return

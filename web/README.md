@@ -32,16 +32,33 @@ http://localhost:5173/?dev=0
 Tabs: **Deposit** (mint faucet tokens, shield), **Transfer** (send to a payment address),
 **Withdraw** (unshield one note), **Auditor** (paste the auditor secret, open every note, freeze).
 
+## Auditor service (no chain scanning)
+
+If `auditor/` is running for the current chain (`VITE_AUDITOR_URL`, default
+`http://127.0.0.1:8788`) the wallet fetches its notes and Merkle proofs from it, authenticated
+with a Schnorr signature by the payment key; the balance card shows "via auditor service".
+Otherwise it scans `NewCommitment` events itself and keeps a local tree ("from chain").
+
+## Aggregator (Phase 2)
+
+Start `aggregator/` (see its README) and the Transfer / Withdraw tabs offer "through the
+aggregator": no wallet transaction, the fee is paid inside the pool. Set `VITE_AGGREGATOR_URL`
+if the service is not on `http://127.0.0.1:8787`.
+
 ## Headless end-to-end
 
 Same wasm and contracts, driven from Node against anvil:
 
 ```sh
-AUDITOR_SECRET=0x… node scripts/e2e-anvil.mjs
+AUDITOR_SECRET=0x… node scripts/e2e-anvil.mjs        # direct path
+AGGREGATOR_SECRET=0x… node scripts/e2e-aggregator.mjs # via the running aggregator
+ADMIN_TOKEN=dev node scripts/e2e-auditor.mjs          # sync through the auditor service
 ```
 
 ## Testnet
 
-Deploy with a funded key (`--private-key`) and the testnet RPC, then rerun `scripts/sync.sh`;
-the app picks up `src/deployments/<chainId>.json` automatically. Proving keys in `public/keys`
+Deploy with a funded key (`--private-key`) and the testnet RPC (see `solidity/README.md`), then
+rerun `scripts/sync.sh`; the app picks up `src/deployments/<chainId>.json` automatically and
+offers the chain in the network selector. For a hosted build set `VITE_AGGREGATOR_URL` to the
+public aggregator URL before `npm run build`. Proving keys in `public/keys`
 (25 MB) should move to a CDN for a public deployment.

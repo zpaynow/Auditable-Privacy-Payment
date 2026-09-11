@@ -97,22 +97,53 @@ Rust 电路层已经完整可用（payment 22 个测试全绿，wasm 可编译�
 | 1.9 ✅ | 审计员页：导入审计密钥，解密全部 audit memo，一键 freeze / unfreeze | 端到端脚本：冻结后花费被拒，解冻后成功 |
 | 1.10 | 测试网端到端 + 浏览器证明耗时实测；超过 30 秒则上 rayon 多线程 | 两个浏览器账号完成完整链路 |
 
-### Phase 2 聚合器服务（约 3–4 周）
+### Phase 2 聚合器服务（2026-09-11 本地链全流程已通）
 
 | 步骤 | 内容 | 验收 |
 | --- | --- | --- |
-| 2.1 | 修 snarkfold 三处 bug，加真实证明测试，补序列化与公开 API：`aggregate(vk, [(proof, publics)]) -> AggProof`、`verify_native` | 真实证明折叠通过，负例被拒 |
-| 2.2 | 手续费约定：transfer 多一个输出给聚合器公钥（1 进 3 出 / 2 进 3 出形状），聚合器解 owner memo 核对 fee ≥ 报价；withdraw 的 fee 字段付给 relayer | 少付费的交易被服务拒绝 |
-| 2.3 | 合约 `submitBatch(nullifiers[], commitments[], memos, proofs[], publics[])`：随机线性组合批验证（r = keccak(全部 publics 与 proofs)），operator 白名单（后续可放开） | 10 笔一批，gas/笔明显低于直接上链 |
-| 2.4 | 服务（Rust axum + sqlite）：`POST /tx` 接收并验证（Groth16、nullifier 未用、root 在窗口）、排队、定时或满额打包、发交易；`GET /tx/:id`、`GET /fee` | 端到端接入 web |
-| 2.5 | 每批产出一个 SnarkFold 聚合证明，`GET /batch/:id` 发布；auditor 原生验证 | auditor 工具验证通过 |
-| 2.6 | web 增加"直接上链 / 通过聚合器（代币付费）"切换与状态轮询 | 用户无 ETH 也能转账 |
+| 2.1 ✅ | snarkfold 重写：修三处 bug，去掉未实现的电路占位，新 API `Aggregator` / `aggregate` / `verify_aggregated`（重放折叠记录 + 3 次配对） | 13 个测试用真实 Groth16 证明通过；篡改、伪造、换 vk 均拒绝 |
+| 2.2 ✅ | 新增 2×3、1×3 电路形状，第三个输出是给聚合器公钥的手续费票据；服务解 owner memo 核对 fee ≥ 报价；withdraw 的 fee 付给 operator | 端到端脚本验证聚合器密钥能解出手续费票据 |
+| 2.3 ✅ | `BatchVerifier.sol` 随机线性组合批验证（n + 3·组 次配对，按组合并 IC 标量）+ `_insertMany` 批量插叶 + `APP.submitBatch` + operator 白名单 | 29 个 forge 测试通过；2 转账 + 1 提现一批 2.29M gas，分开发约 3.1M |
+| 2.4 ✅ | `aggregator/`：axum + alloy + sqlite；`/info`、`/tx/transfer`、`/tx/withdraw`、`/tx/:id`、`/batch/:id`；本地验证、链上预检、定时/满额打包 | `web/scripts/e2e-aggregator.mjs` 全流程通过 |
+| 2.5 ✅ | 每批按电路分组产出 SnarkFold 聚合证明，`/batch/:id/proof/:group` 提供；`app-tools verify-agg` 原生验证 | 两个批次的聚合证明验证通过 |
+| 2.6 ✅ | Transfer / Withdraw 页签增加"通过聚合器"开关，显示报价，轮询状态 | 待浏览器手动验证 |
+
+### 追加：审计员服务（2026-09-11 完成，本地链验证）
+
+| 步骤 | 内容 | 验收 |
+| --- | --- | --- |
+| A.1 ✅ | `payment` 新增 BabyJubJub Schnorr 签名（`Keypair::sign` / `verify_signature`），wasm 暴露 `sign_message` / `verify_message` | 单测通过 |
+| A.2 ✅ | `auditor/` 服务：索引 NewCommitment / NewNullifier / FrozenSet，用审计密钥打开所有 audit memo，维护 Merkle 树；`/notes`、`/proof/:index` 需支付密钥签名鉴权；`/nullifiers/check` 公开；`/audit/notes` 管理端 | `web/scripts/e2e-auditor.mjs` 全流程通过，未鉴权与篡改签名被拒 |
+| A.3 ✅ | web `RemoteWallet`：服务可达时自动改为从服务取票据与证明，不扫链、不建树；不可达时回退扫链 | 余额卡片显示同步模式 |
+| A.4 ✅ | Auditor 页签默认只解密"本页签打开后"新产生的票据，另有"最近 N 张"和"全部"两种范围；仍在浏览器内用审计密钥解密 | 便于演示；管理端接口留作后续 |
 
 ### Phase 3 展望
 
 decider 电路（链上 O(1) 验证聚合证明）、多 ledger 与 facilitator（`app.jpg` 的架构）、跨链结算、MPC setup、安全审计。
 
-## 4. 需要拍板的决策（括号为默认值）
+## 4. 性能实测（2026-09-11，anvil / M 系列 Mac 单线程）
+
+用户侧出证（wasm，Node 单线程；浏览器同量级）：
+
+| 形状 | 直接上链 | 走聚合器（多一个手续费输出） |
+| --- | --- | --- |
+| deposit | 4.7 s | 同（存入始终直接上链） |
+| 1 进 | 1×2：15.8 s | 1×3：19.3 s |
+| 2 进 | 2×2：19.8 s | 2×3：25.9 s |
+| withdraw | 6.6 s | 6.6 s（只是 fee 字段不同） |
+
+链上 gas：
+
+| 操作 | 直接上链（每笔） | 聚合器（每笔均摊） |
+| --- | --- | --- |
+| 转账 | 1×2：1.19–1.29M；2×2：1.33M | 1 笔/批 1.53M；2 笔 0.85M；4 笔 0.56M；8 笔 0.40M；边际每笔约 0.24M |
+| 提现 | 0.33M | 2 笔/批 0.28M；8 转账 + 2 提现一批均摊 0.37M |
+| 其中 Groth16 验证 | 约 245k（4 次配对） | 每证明约 46k（1 次配对 + 2 次 G1 乘），每组另加 3 次配对 |
+| 其中 Poseidon 插叶 | 2 叶约 21 次哈希 ≈ 0.95M | 3n + 20 次哈希摊到 n 笔；8 笔时每笔约 5.5 次 ≈ 0.25M |
+
+聚合器侧（原生 Rust）：Groth16 单笔验证 2.8 ms；SnarkFold 折叠 8 笔 25 ms、100 笔 277 ms；验证聚合证明 8 笔 11.6 ms、100 笔 121 ms（逐笔验证 21 ms / 154 ms）；聚合证明约 570–660 B/笔。服务吞吐受链上 gas 限制而非 CPU。
+
+## 5. 需要拍板的决策（括号为默认值）
 
 - **D1 测试网**：Base Sepolia（默认，便宜且快）/ Sepolia / 其他。
 - **D2 Poseidon**：方案 A 保留参数自写 Solidity（默认）/ 方案 B 换标准参数。

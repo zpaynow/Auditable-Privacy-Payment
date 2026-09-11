@@ -1,0 +1,1033 @@
+[
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "_verifiers",
+    "type": "tuple",
+    "internalType": "struct APP.Verifiers",
+    "components": [
+     {
+      "name": "deposit",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "withdraw",
+      "type": "address",
+      "internalType": "address"
+     }
+    ]
+   },
+   {
+    "name": "_auditorX",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "_auditorY",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "_auditorAdmin",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "MAX_LEAVES",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "ROOT_HISTORY_SIZE",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "TREE_DEPTH",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "assetToken",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "auditorAdmin",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "auditorX",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "auditorY",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "batchCount",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "currentRootIndex",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "deposit",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "commitment",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ownerMemo",
+    "type": "bytes",
+    "internalType": "bytes"
+   },
+   {
+    "name": "auditMemo",
+    "type": "bytes",
+    "internalType": "bytes"
+   },
+   {
+    "name": "proof",
+    "type": "uint256[8]",
+    "internalType": "uint256[8]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "frozen",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "getLastRoot",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "isKnownRoot",
+  "inputs": [
+   {
+    "name": "root",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "nextLeafIndex",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "nullifiers",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "operators",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "owner",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "registerAsset",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "token",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "roots",
+  "inputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "setAuditor",
+  "inputs": [
+   {
+    "name": "x",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "y",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "admin",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setFrozen",
+  "inputs": [
+   {
+    "name": "freezer",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "isFrozen",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setOperator",
+  "inputs": [
+   {
+    "name": "operator",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "allowed",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "submitBatch",
+  "inputs": [
+   {
+    "name": "transfers",
+    "type": "tuple[]",
+    "internalType": "struct APP.BatchTransfer[]",
+    "components": [
+     {
+      "name": "shape",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "nullifiers",
+      "type": "uint256[]",
+      "internalType": "uint256[]"
+     },
+     {
+      "name": "freezers",
+      "type": "uint256[]",
+      "internalType": "uint256[]"
+     },
+     {
+      "name": "commitments",
+      "type": "uint256[3]",
+      "internalType": "uint256[3]"
+     },
+     {
+      "name": "root",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "ownerMemos",
+      "type": "bytes[3]",
+      "internalType": "bytes[3]"
+     },
+     {
+      "name": "auditMemos",
+      "type": "bytes[3]",
+      "internalType": "bytes[3]"
+     },
+     {
+      "name": "proof",
+      "type": "uint256[8]",
+      "internalType": "uint256[8]"
+     }
+    ]
+   },
+   {
+    "name": "withdraws",
+    "type": "tuple[]",
+    "internalType": "struct APP.BatchWithdraw[]",
+    "components": [
+     {
+      "name": "asset",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "amount",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "nullifier",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "freezer",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "root",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "recipient",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "fee",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "proof",
+      "type": "uint256[8]",
+      "internalType": "uint256[8]"
+     }
+    ]
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "tokenAsset",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "transfer",
+  "inputs": [
+   {
+    "name": "nullifiers_",
+    "type": "uint256[2]",
+    "internalType": "uint256[2]"
+   },
+   {
+    "name": "freezers",
+    "type": "uint256[2]",
+    "internalType": "uint256[2]"
+   },
+   {
+    "name": "commitments",
+    "type": "uint256[2]",
+    "internalType": "uint256[2]"
+   },
+   {
+    "name": "root",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ownerMemos",
+    "type": "bytes[2]",
+    "internalType": "bytes[2]"
+   },
+   {
+    "name": "auditMemos",
+    "type": "bytes[2]",
+    "internalType": "bytes[2]"
+   },
+   {
+    "name": "proof",
+    "type": "uint256[8]",
+    "internalType": "uint256[8]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "transfer1",
+  "inputs": [
+   {
+    "name": "nullifier",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "freezer",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "commitments",
+    "type": "uint256[2]",
+    "internalType": "uint256[2]"
+   },
+   {
+    "name": "root",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "ownerMemos",
+    "type": "bytes[2]",
+    "internalType": "bytes[2]"
+   },
+   {
+    "name": "auditMemos",
+    "type": "bytes[2]",
+    "internalType": "bytes[2]"
+   },
+   {
+    "name": "proof",
+    "type": "uint256[8]",
+    "internalType": "uint256[8]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "transferOwnership",
+  "inputs": [
+   {
+    "name": "newOwner",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "verifiers",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "deposit",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "transfer2x2",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "transfer1x2",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "transfer2x3",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "transfer1x3",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "withdraw",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "withdraw",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "nullifier",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "freezer",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "root",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "recipient",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "fee",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "proof",
+    "type": "uint256[8]",
+    "internalType": "uint256[8]"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "AssetRegistered",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "indexed": true,
+    "internalType": "uint64"
+   },
+   {
+    "name": "token",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "AuditorSet",
+  "inputs": [
+   {
+    "name": "x",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "y",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "admin",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "BatchSubmitted",
+  "inputs": [
+   {
+    "name": "batchId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "operator",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "transfers",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "withdraws",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "newRoot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Deposit",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "indexed": true,
+    "internalType": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint128",
+    "indexed": false,
+    "internalType": "uint128"
+   },
+   {
+    "name": "commitment",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "FrozenSet",
+  "inputs": [
+   {
+    "name": "freezer",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "isFrozen",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "NewCommitment",
+  "inputs": [
+   {
+    "name": "index",
+    "type": "uint32",
+    "indexed": true,
+    "internalType": "uint32"
+   },
+   {
+    "name": "commitment",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "ownerMemo",
+    "type": "bytes",
+    "indexed": false,
+    "internalType": "bytes"
+   },
+   {
+    "name": "auditMemo",
+    "type": "bytes",
+    "indexed": false,
+    "internalType": "bytes"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "NewNullifier",
+  "inputs": [
+   {
+    "name": "nullifier",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OperatorSet",
+  "inputs": [
+   {
+    "name": "operator",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "allowed",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Withdraw",
+  "inputs": [
+   {
+    "name": "asset",
+    "type": "uint64",
+    "indexed": true,
+    "internalType": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint128",
+    "indexed": false,
+    "internalType": "uint128"
+   },
+   {
+    "name": "recipient",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "fee",
+    "type": "uint128",
+    "indexed": false,
+    "internalType": "uint128"
+   },
+   {
+    "name": "relayer",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "AssetAlreadyRegistered",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadMemoLength",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadShape",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "EmptyBatch",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "FeeExceedsAmount",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Frozen",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InvalidProof",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotAuditor",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOperator",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NullifierUsed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "TreeFull",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UnknownAsset",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UnknownRoot",
+  "inputs": []
+ }
+]

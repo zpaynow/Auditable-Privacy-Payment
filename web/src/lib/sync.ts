@@ -5,6 +5,7 @@ import { loadWasm } from './wasm'
 import type { ZkKey } from './keys'
 import { bytesToHex, bigintToBe32, hexToBytes, readU128le, readU64le, lo, hi, type Hex } from './encoding'
 import { appAbi } from './config'
+import { checkNullifiers, getNotes, getProof, getStatus } from './auditorClient'
 
 export interface Utxo {
   index: number
@@ -24,6 +25,16 @@ export interface SyncState {
   root: Hex
   utxos: Utxo[]
   lastBlock: bigint
+  /** where the notes came from */
+  mode: 'chain' | 'auditor'
+}
+
+/** What the transaction builders need from a wallet, regardless of how it syncs. */
+export interface NoteSource {
+  readonly utxos: Utxo[]
+  sync(): Promise<SyncState>
+  /** Merkle proofs for the given leaves, all against one root (EVM bytes32). */
+  proofsFor(indices: number[]): Promise<{ proofs: Uint8Array[]; root: Hex }>
 }
 
 const NEW_COMMITMENT = parseAbiItem(
@@ -78,7 +89,7 @@ export async function fetchNullifiers(client: PublicClient, app: Hex, fromBlock:
 /**
  * Wallet-side tree. Kept for the lifetime of the page; `sync` appends new leaves.
  */
-export class ShieldedWallet {
+export class ShieldedWallet implements NoteSource {
   private tree: InstanceType<Awaited<ReturnType<typeof loadWasm>>['WasmMerkleTree']> | null = null
   private w: Awaited<ReturnType<typeof loadWasm>> | null = null
   private leaves: CommitmentLog[] = []
@@ -104,9 +115,8 @@ export class ShieldedWallet {
     this.tree = new this.w.WasmMerkleTree(0)
   }
 
-  /** Merkle proof blob for one of our UTXOs (tree must be committed, which sync does). */
-  proofFor(index: number): Uint8Array {
-    return this.tree!.proof(index)
+  async proofsFor(indices: number[]): Promise<{ proofs: Uint8Array[]; root: Hex }> {
+    return { proofs: indices.map((i) => this.tree!.proof(i)), root: this.rootEvm() }
   }
 
   rootEvm(): Hex {
@@ -175,7 +185,86 @@ export class ShieldedWallet {
       root: this.leaves.length ? this.rootEvm() : ('0x' + '0'.repeat(64)) as Hex,
       utxos: [...this.utxos],
       lastBlock: head,
+      mode: 'chain',
     }
+  }
+}
+
+/**
+ * Wallet backed by the auditor service: no chain scanning and no local tree. The service
+ * knows which notes belong to our key (it opens every audit memo); we still decrypt the owner
+ * memos locally to learn the blinds, so only we can spend.
+ */
+export class RemoteWallet implements NoteSource {
+  private w: Awaited<ReturnType<typeof loadWasm>> | null = null
+  private key: ZkKey
+  private chainId: number
+  private app: Hex
+  utxos: Utxo[] = []
+
+  constructor(key: ZkKey, chainId: number, app: Hex) {
+    this.key = key
+    this.chainId = chainId
+    this.app = app
+  }
+
+  async sync(): Promise<SyncState> {
+    if (!this.w) this.w = await loadWasm()
+    const w = this.w
+    const [status, notes] = await Promise.all([getStatus(), getNotes(this.key, this.chainId, this.app)])
+    const known = new Map(this.utxos.map((u) => [u.index, u]))
+    for (const n of notes) {
+      if (known.has(n.index)) {
+        known.get(n.index)!.frozen = n.frozen
+        continue
+      }
+      const commLe = w.fr_from_evm(hexToBytes(n.commitment))
+      try {
+        const dec = w.owner_memo_decrypt(this.key.secret, commLe, hexToBytes(n.owner_memo))
+        const asset = readU64le(dec, 0)
+        const amount = readU128le(dec, 8)
+        const blind = dec.slice(24, 56)
+        const nullifier = bytesToHex(w.fr_to_evm(w.compute_nullifier(this.key.secret, asset, lo(amount), hi(amount), blind)))
+        this.utxos.push({
+          index: n.index,
+          commitment: n.commitment,
+          commitmentLe: commLe,
+          asset,
+          amount,
+          blind,
+          nullifier,
+          freezer: n.freezer,
+          spent: false,
+          frozen: n.frozen,
+        })
+      } catch {
+        /* the service attributed a note to us that our key cannot open: ignore */
+      }
+    }
+    this.utxos.sort((a, b) => a.index - b.index)
+    const live = this.utxos.filter((u) => !u.spent)
+    if (live.length) {
+      const spent = await checkNullifiers(live.map((u) => u.nullifier))
+      live.forEach((u, i) => (u.spent = spent[i]))
+    }
+    return {
+      count: status.notes,
+      root: status.root,
+      utxos: [...this.utxos],
+      lastBlock: BigInt(status.indexed_block ?? 0),
+      mode: 'auditor',
+    }
+  }
+
+  async proofsFor(indices: number[]): Promise<{ proofs: Uint8Array[]; root: Hex }> {
+    // all proofs must open to the same root; retry once if the tree moved between requests
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ps = []
+      for (const i of indices) ps.push(await getProof(this.key, this.chainId, this.app, i))
+      const root = ps[0].root
+      if (ps.every((p) => p.root === root)) return { proofs: ps.map((p) => hexToBytes(p.proof)), root }
+    }
+    throw new Error('auditor service tree changed while fetching proofs; try again')
   }
 }
 
@@ -191,10 +280,22 @@ export interface AuditRow {
   blockNumber: bigint
 }
 
-export async function auditScan(client: PublicClient, app: Hex, deployBlock: number, auditorSecret: Uint8Array) {
+/**
+ * Decrypt audit memos with the auditor secret.
+ * `fromBlock` limits the scan (e.g. the block when the auditor tab was opened);
+ * `lastN` keeps only the newest N notes of that range.
+ */
+export async function auditScan(
+  client: PublicClient,
+  app: Hex,
+  fromBlock: number | bigint,
+  auditorSecret: Uint8Array,
+  lastN?: number,
+) {
   const w = await loadWasm()
   const head = await client.getBlockNumber()
-  const logs = await fetchCommitmentLogs(client, app, BigInt(deployBlock), head)
+  let logs = await fetchCommitmentLogs(client, app, BigInt(fromBlock), head)
+  if (lastN !== undefined && logs.length > lastN) logs = logs.slice(logs.length - lastN)
   const rows: AuditRow[] = []
   for (const l of logs) {
     try {

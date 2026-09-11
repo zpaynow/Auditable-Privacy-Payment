@@ -226,6 +226,25 @@ pub struct MTProof {
 }
 
 impl MTProof {
+    /// Byte length of [`MTProof::to_bytes`].
+    pub const BYTES: usize = TREE_DEPTH * 64 + 32 + 12;
+
+    /// Serialize: nodes (TREE_DEPTH × (left 32 || right 32), LE) || root (32) ||
+    /// version (4 LE) || index (4 LE) || ledger (4 LE). Shared with the wasm and services.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        use ark_serialize::CanonicalSerialize;
+        let mut out = Vec::with_capacity(Self::BYTES);
+        for n in &self.nodes {
+            n.left.serialize_compressed(&mut out).expect("fr");
+            n.right.serialize_compressed(&mut out).expect("fr");
+        }
+        self.root.serialize_compressed(&mut out).expect("fr");
+        out.extend(self.version.to_le_bytes());
+        out.extend(self.index.to_le_bytes());
+        out.extend(self.ledger.to_le_bytes());
+        out
+    }
+
     /// check the merkle proof is right
     pub fn verify(&self) -> bool {
         for (i, node) in self.nodes.iter().enumerate() {

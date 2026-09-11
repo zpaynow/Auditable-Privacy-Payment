@@ -7,39 +7,57 @@ contract WithdrawVerifier {
     uint256 constant r = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
     uint256 constant q = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
 
-    uint256 constant alphax = 0x00e1b3b13e8b8fadb5615e73a489472fd70ad9b94042367218867fde431a1c33;
-    uint256 constant alphay = 0x1edeea23ec1ddf567b2948d1ef56b00848312cc0c17455e0dbdbc18dc4aca7f8;
-    uint256 constant betax1 = 0x1e2a0cf618bdab4f0a9b10bef0e6d0e739cac9b4b461c9b016a15eb116234bc9;
-    uint256 constant betax2 = 0x23ebbca098512f53af69067de1c04dc67a12383ae59fc304323eed44e88358c4;
-    uint256 constant betay1 = 0x09d6ee15c032d9b6d49d154be6ead4ae0149ffd8183d27719f997d3871c72437;
-    uint256 constant betay2 = 0x10e7e2962dd404279a28028cb33f3255240a1203018bafdbbea1fdd246a99c37;
-    uint256 constant gammax1 = 0x2a21c018ba049cf356808c0c7443f8fdd8c301bb9aa8d567e344a3a76efe43f5;
-    uint256 constant gammax2 = 0x0bdcc22b34a55928ec2bd3eb37f4bf3d4eaf2a85815329b055c3cb2960e98267;
-    uint256 constant gammay1 = 0x2d5fbc85f1d6987616d69e11649dd9d23d1b65a9242a219716ea50ce758a3015;
-    uint256 constant gammay2 = 0x26b317ab789fe6a64fd579d87722d6837ea1c8c369e33f4e79b0b3b7c5a7273c;
-    uint256 constant deltax1 = 0x1ad1322eee5aadde0e3596f71cf25cb213745c5d003d2f31bf975ce8126cbbf8;
-    uint256 constant deltax2 = 0x1bba9b483949a6f912c86887edc279e4b2c1743064a6b9049f6e98a417f0eeb7;
-    uint256 constant deltay1 = 0x2766b6c726cbd7e60619c7aedebb158dcae8c473f53369fc6b4ab7ba6dd28118;
-    uint256 constant deltay2 = 0x2d9efa218c457042d81815a9beaa695ac6375ee6ae500bb4bf27709a0acc6266;
+    uint256 constant alphax = 0x1f1ec46b1c91ee182de5317488fee41db8af79981401c669b19f2d4d41a98e0b;
+    uint256 constant alphay = 0x16e229cd54ed8904b4086ac322b62ef1bc817240ee02c12c923722040bd8acd3;
+    uint256 constant betax1 = 0x131fa6c9edb570f2f2f28b6b131aa628b06cc633f0f7b0fea6a7509a00d93000;
+    uint256 constant betax2 = 0x2a0e619a22ab15cde250d18a6e5ff28f3ed905338ebf0b67d178c200e6f2cb09;
+    uint256 constant betay1 = 0x0bd6209aecd36d37bf44d54416cbfa1df80d7dda9a805d472a9307ca9dbb0ec9;
+    uint256 constant betay2 = 0x1218afb0b3bd0a8bb3c7f6e5104f40c3e303c97f6f36fa32099fc25bcab96b30;
+    uint256 constant gammax1 = 0x268507721b53adc5d8729cf628d5a750d40bb9c84093211d43a04f77c4b0ee4b;
+    uint256 constant gammax2 = 0x1a7f534ee364fe3d69b6495b80b02f7336f37eea9893a4c6ccfdfde583e92ab9;
+    uint256 constant gammay1 = 0x30361a2be88db07efef627c373a1b58f1f52b23b9792f919c592fbe79e176e8b;
+    uint256 constant gammay2 = 0x166f9a375477704dc070a4dd7cab81bfb96bf179db467a54024d48ea6e7e2be0;
+    uint256 constant deltax1 = 0x2d2b49d659a7a96f1f69f07f7c2d06c1261254221be5f81db92165b35d62f842;
+    uint256 constant deltax2 = 0x20a0cd9278a73f7947e89c5bfd7d6158e784f68a6e685244f7aeac7bdd0cf0c1;
+    uint256 constant deltay1 = 0x002e988a3a5043e65df8d3e114e2cd33b406c5a24b65d89d9a18bd1ecfd9b9aa;
+    uint256 constant deltay2 = 0x2cca97dd9f982bd50ef1ade6649dd187cdf15ce35c8354410ab8b01528444931;
 
-    uint256 constant IC0x = 0x1b7929a975c04e62aaa6fab8cda0d0c4fda0551528bc7327abc2e3e97b64de2e;
-    uint256 constant IC0y = 0x2719d245cbe457d106d083c0768395a0dad495b9fcf6c3af3a90fcd57636c4b0;
-    uint256 constant IC1x = 0x11efbcb148c16db9c67bab469786a5cdfe1cc38fd82fcfbbd76376c4616d1cdc;
-    uint256 constant IC1y = 0x15e682eaf2a04ba036b3d5091a36603dcd3e02ef99dac8ce8568a3fbd5ce68c5;
-    uint256 constant IC2x = 0x05e849f3a7470928f84b05c2a95cda0532016e546e9bbbca2d69df6fecfdd670;
-    uint256 constant IC2y = 0x19db6e9795cba8122570490a1835eb13cfb0fd339e99f311f61f4a388e71f861;
-    uint256 constant IC3x = 0x0f71cdd80c796d34f8470e7ea3fafb10cc3838d0a55a87a2ff22964b9b4583e4;
-    uint256 constant IC3y = 0x130460f68fca862d8c829ab33cafab00c2367227cb0d9ba39dca6e3e53defecd;
-    uint256 constant IC4x = 0x2ad33cd369445fdbf4a60fb72b7e2d790fad25129cd8a35aefa830ad06071197;
-    uint256 constant IC4y = 0x1a988aea7162be54f324f2d4da483affa8ed5a43754d21d007d473d5b4083f1f;
-    uint256 constant IC5x = 0x1013333d7401e13c81ae476db81c02b8159b4e47c82cb7c47f4360e16f6d6b5a;
-    uint256 constant IC5y = 0x19954152c5127e79afaa7bdc836f43834dbdf634e72260bb2fef38b7f4ebbffb;
-    uint256 constant IC6x = 0x146d1646d4649040e605165d6407f7cee63e028a6962bcaa92441b8ad5600b5e;
-    uint256 constant IC6y = 0x21134b5cd9509894951a3b49178bb370ddb41037dc00a833ebc5fa548f59ad3f;
-    uint256 constant IC7x = 0x23a6b3ae36c4eb8c25a757cd0660bb123de039e456a82e4fa224c90dfcc091b8;
-    uint256 constant IC7y = 0x0207fd8b032a7db36206e50f1578e57cfb4e8c17d912742a29805ba1c9dbc0ae;
+    uint256 constant IC0x = 0x0927aca85cce77f0161ec1b229ae37f26be6f8e961672cb3c757a1af3ae8e589;
+    uint256 constant IC0y = 0x163ba0e9e1e08864d72bf595e643cc648166434d01ae11e8ee270450a12fc8d7;
+    uint256 constant IC1x = 0x22e4932d9a27f0a4590303bdb2dc4d13a992e7bad338e9b912ec761858c575c7;
+    uint256 constant IC1y = 0x23ecdadcc659b2e59e1f4a5eca7115e8e752cd1c81597b3386654298d050f3fe;
+    uint256 constant IC2x = 0x17179ef28777ec32d6c762e37349017ff40c54c46c83d382d08fbcfc9b04bf11;
+    uint256 constant IC2y = 0x211fa09a6c25a7a21b59e34272d8777c9535f6251bb6aca0ae87788200173eec;
+    uint256 constant IC3x = 0x017cabd8e4eecb67e7665af1e90eaa9bc17b785bad3ff0d13fe1ebb6a0f6ea9a;
+    uint256 constant IC3y = 0x1f77849ce35925e05d703a857b2d6fb41f26edb60fdf0d380e981ac68d3af18a;
+    uint256 constant IC4x = 0x1952f09ee384c99908eceb6cd0ed40365566543783fb0b30cb498dc28f9a8417;
+    uint256 constant IC4y = 0x144c7e8f682e959a959081d76c165064beb33d609585281ac5f251a35a636a79;
+    uint256 constant IC5x = 0x0a1cf557a7cdff56ad31844bf1ab8fa042f5f36fcbd77a0f434b00de944a3e18;
+    uint256 constant IC5y = 0x100252a6a54532eb194cfc84c1ad753b1864d3fe68c7640ee5eaa41d9db36a3a;
+    uint256 constant IC6x = 0x296275590636681a27d846d6a1e9653393d6420d0669500d60d02302ceb5476a;
+    uint256 constant IC6y = 0x24297c4735ff14d4eaa30542b778e872b0976d38c429e554044d07ffc1d5dd0f;
+    uint256 constant IC7x = 0x13a6b8060854d59be42d82e526edd5284e20c93974ba16ac93686075c1ded7c6;
+    uint256 constant IC7y = 0x26617b1908750da8972a74280917d42098f99d860f7b36550a8e3a37811de47c;
 
     uint256 public constant NUM_INPUTS = 7;
+
+    /// @notice Verifying key as flat words for batch verification:
+    ///         [alpha.x, alpha.y, beta(4), gamma(4), delta(4), IC0.x, IC0.y, IC1.x, IC1.y, …]
+    function vkPoints() external pure returns (uint256[] memory p) {
+        p = new uint256[](14 + 2 * (NUM_INPUTS + 1));
+        p[0] = alphax; p[1] = alphay;
+        p[2] = betax1; p[3] = betax2; p[4] = betay1; p[5] = betay2;
+        p[6] = gammax1; p[7] = gammax2; p[8] = gammay1; p[9] = gammay2;
+        p[10] = deltax1; p[11] = deltax2; p[12] = deltay1; p[13] = deltay2;
+        p[14] = IC0x; p[15] = IC0y;
+        p[16] = IC1x; p[17] = IC1y;
+        p[18] = IC2x; p[19] = IC2y;
+        p[20] = IC3x; p[21] = IC3y;
+        p[22] = IC4x; p[23] = IC4y;
+        p[24] = IC5x; p[25] = IC5y;
+        p[26] = IC6x; p[27] = IC6y;
+        p[28] = IC7x; p[29] = IC7y;
+    }
 
     /// @dev proof = [A.x, A.y, B.x1, B.x2, B.y1, B.y2, C.x, C.y]
     function verifyProof(uint256[8] calldata proof, uint256[7] calldata pubSignals) public view returns (bool) {

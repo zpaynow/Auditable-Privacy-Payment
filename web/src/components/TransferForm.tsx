@@ -2,8 +2,9 @@ import { useState } from 'react'
 import type { Hex } from '../lib/encoding'
 import { formatAmount, parseAmount } from '../lib/encoding'
 import { parseZkAddress } from '../lib/keys'
-import { selectInputs, transfer } from '../lib/tx'
-import type { ShieldedWallet, SyncState } from '../lib/sync'
+import { selectInputs, transfer, transferViaAggregator } from '../lib/tx'
+import { useAggregator } from './useAggregator'
+import type { NoteSource, SyncState } from '../lib/sync'
 import type { LogLine } from './Activity'
 import { useOp } from './useOp'
 
@@ -18,22 +19,27 @@ export function TransferForm({
   onDone,
 }: {
   ctx: Ctx
-  wallet: ShieldedWallet
+  wallet: NoteSource
   sync: SyncState | null
   onLog: (t: string, l?: LogLine['level']) => void
   onDone: (h: Hex) => void
 }) {
   const [to, setTo] = useState('')
   const [amount, setAmount] = useState('')
+  const [viaAgg, setViaAgg] = useState(false)
   const { busy, step, run } = useOp(onLog)
+  const agg = useAggregator(ctx.publicClient.chain?.id ?? 0)
+  const useAgg = viaAgg && agg.info !== null
+  const aggFee = agg.info ? BigInt(agg.info.transfer_fee) : 0n
 
   let plan: string | null = null
   try {
     if (sync && amount) {
       const amt = parseAmount(amount, DECIMALS)
-      const ins = selectInputs(sync.utxos, amt)
+      const need = useAgg ? amt + aggFee : amt
+      const ins = selectInputs(sync.utxos, need)
       const total = ins.reduce((s, u) => s + u.amount, 0n)
-      plan = `Spends note${ins.length > 1 ? 's' : ''} #${ins.map((u) => u.index).join(', #')} (${formatAmount(total, DECIMALS)}), change ${formatAmount(total - amt, DECIMALS)} back to you.`
+      plan = `Spends note${ins.length > 1 ? 's' : ''} #${ins.map((u) => u.index).join(', #')} (${formatAmount(total, DECIMALS)}), change ${formatAmount(total - need, DECIMALS)} back to you${useAgg ? `, fee ${formatAmount(aggFee, DECIMALS)} to the aggregator` : ''}.`
     }
   } catch (e) {
     plan = e instanceof Error ? e.message : String(e)
@@ -52,7 +58,9 @@ export function TransferForm({
       return
     }
     if (!sync) return
-    const h = await run('Transfer', (p) => transfer(ctx, wallet, dest, amt, p))
+    const h = await run(useAgg ? 'Transfer via aggregator' : 'Transfer', (p) =>
+      useAgg ? transferViaAggregator(ctx, wallet, dest, amt, agg.info!, p) : transfer(ctx, wallet, dest, amt, p),
+    )
     if (h) {
       onDone(h)
       setAmount('')
@@ -78,6 +86,14 @@ export function TransferForm({
           {busy ? 'Working…' : 'Send privately'}
         </button>
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input id="transfer-via-agg" type="checkbox" style={{ width: 'auto' }} checked={useAgg} disabled={!agg.info} onChange={(e) => setViaAgg(e.target.checked)} />
+        <span>
+          Send through the aggregator: no wallet transaction, fee{' '}
+          {agg.info ? `${formatAmount(aggFee, DECIMALS)} tUSD paid from your notes` : 'unavailable'}
+          {agg.error && <span style={{ color: 'var(--ink-3)' }}> ({agg.error})</span>}
+        </span>
+      </label>
       {plan && <p className="hint">{plan}</p>}
       {step && (
         <div className="progress">

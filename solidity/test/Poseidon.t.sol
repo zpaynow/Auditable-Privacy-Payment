@@ -9,6 +9,10 @@ contract TreeHarness is IncrementalMerkleTree {
     function insert(uint256 leaf) external returns (uint32) {
         return _insert(leaf);
     }
+
+    function insertMany(uint256[] memory leaves) external returns (uint32) {
+        return _insertMany(leaves);
+    }
 }
 
 /// Vectors come from `cargo run -p app-tools -- poseidon-sol` (Rust `poseidon_merge_hash` / `MerkleTree`).
@@ -44,6 +48,30 @@ contract PoseidonTest is Test {
 
     function hashExternal(uint256 l, uint256 r) external pure returns (uint256) {
         return PoseidonT3.hash(l, r);
+    }
+
+    function test_batch_insert_matches_rust() public {
+        uint256[] memory sizes = vm.parseJsonUintArray(json, ".batch_sizes");
+        uint256[] memory leaves = vm.parseJsonUintArray(json, ".batch_leaves");
+        uint256[] memory roots = vm.parseJsonUintArray(json, ".batch_roots");
+
+        TreeHarness t = new TreeHarness();
+        uint256 off = 0;
+        for (uint256 b = 0; b < sizes.length; b++) {
+            uint256[] memory batch = new uint256[](sizes[b]);
+            for (uint256 i = 0; i < sizes[b]; i++) batch[i] = leaves[off + i];
+            uint256 g = gasleft();
+            uint32 start = t.insertMany(batch);
+            emit log_named_uint(string.concat("insertMany(", vm.toString(sizes[b]), ") gas"), g - gasleft());
+            assertEq(start, uint32(off));
+            off += sizes[b];
+            assertEq(t.nextLeafIndex(), uint32(off));
+            assertEq(t.getLastRoot(), roots[b], "batch root mismatch");
+        }
+        // single inserts after batches still agree with a fresh sequential tree
+        TreeHarness seq = new TreeHarness();
+        for (uint256 i = 0; i < leaves.length; i++) seq.insert(leaves[i]);
+        assertEq(seq.getLastRoot(), t.getLastRoot(), "sequential vs batched root");
     }
 
     function test_tree_roots_match_rust() public {

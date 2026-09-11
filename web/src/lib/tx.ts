@@ -3,8 +3,9 @@ import type { PublicClient, WalletClient } from 'viem'
 import { loadWasm } from './wasm'
 import { prove } from './prover'
 import type { ZkKey } from './keys'
-import type { ShieldedWallet, Utxo } from './sync'
+import type { NoteSource, Utxo } from './sync'
 import { appAbi, tokenAbi, ASSET_ID, type Deployment } from './config'
+import { submitTransfer, submitWithdraw, waitForTx, type AggregatorInfo } from './aggregator'
 import {
   addressToBytes,
   bigintToBe32,
@@ -146,7 +147,7 @@ export interface TransferResult {
 
 export async function transfer(
   ctx: Ctx,
-  wallet: ShieldedWallet,
+  wallet: NoteSource,
   to: Uint8Array,
   amount: bigint,
   onProgress: Progress,
@@ -159,9 +160,8 @@ export async function transfer(
   const change = total - amount
 
   onProgress('Building notes…')
-  const inBlob = concat(
-    ...inputs.map((u) => concat(u64le(u.asset), u128le(u.amount), u.blind, wallet.proofFor(u.index))),
-  )
+  const { proofs: mps } = await wallet.proofsFor(inputs.map((u) => u.index))
+  const inBlob = concat(...inputs.map((u, i) => concat(u64le(u.asset), u128le(u.amount), u.blind, mps[i])))
   const outs = [
     { amount, pk: to, blind: w.generate_random_blind(randomBytes(32)) },
     { amount: change, pk: key.pk, blind: w.generate_random_blind(randomBytes(32)) },
@@ -233,13 +233,14 @@ export async function transfer(
 // ----------------------------------------------------------------- withdraw
 export async function withdraw(
   ctx: Ctx,
-  wallet: ShieldedWallet,
+  wallet: NoteSource,
   utxo: Utxo,
   recipient: Hex,
   onProgress: Progress,
 ): Promise<Hex> {
   const { deployment: d, key } = ctx
   const fee = 0n
+  const { proofs: [mp], root } = await wallet.proofsFor([utxo.index])
   onProgress('Generating proof (this can take a while)…')
   const { result, ms } = await prove<{ proofEvm: Uint8Array }>({
     kind: 'withdraw',
@@ -250,7 +251,7 @@ export async function withdraw(
     fee,
     inputBlind: utxo.blind,
     ownerPk: key.pk,
-    merkleProof: wallet.proofFor(utxo.index),
+    merkleProof: mp,
   })
   onProgress(`Proof ready in ${(ms / 1000).toFixed(1)} s`)
   return send(
@@ -264,7 +265,7 @@ export async function withdraw(
         utxo.amount,
         BigInt(utxo.nullifier),
         BigInt(utxo.freezer),
-        BigInt(wallet.rootEvm()),
+        BigInt(root),
         recipient,
         fee,
         proofWords(result.proofEvm),
@@ -305,4 +306,103 @@ export async function mintTestToken(ctx: Ctx, amount: bigint, onProgress: Progre
     },
     onProgress,
   )
+}
+
+
+// ------------------------------------------------------ via the aggregator
+/// Shielded transfer settled by the aggregator: 3 outputs [to, change, fee -> aggregator key].
+/// No wallet transaction; the fee is paid inside the pool.
+export async function transferViaAggregator(
+  ctx: Ctx,
+  wallet: NoteSource,
+  to: Uint8Array,
+  amount: bigint,
+  info: AggregatorInfo,
+  onProgress: Progress,
+): Promise<Hex> {
+  const w = await loadWasm()
+  const { deployment: d, key } = ctx
+  const asset = ASSET_ID
+  const fee = BigInt(info.transfer_fee)
+  const inputs = selectInputs(wallet.utxos, amount + fee)
+  const total = inputs.reduce((s, u) => s + u.amount, 0n)
+  const change = total - amount - fee
+
+  onProgress('Building notes (incl. fee note)…')
+  const { proofs: mps } = await wallet.proofsFor(inputs.map((u) => u.index))
+  const inBlob = concat(...inputs.map((u, i) => concat(u64le(u.asset), u128le(u.amount), u.blind, mps[i])))
+  const outs = [
+    { amount, pk: to, blind: w.generate_random_blind(randomBytes(32)) },
+    { amount: change, pk: key.pk, blind: w.generate_random_blind(randomBytes(32)) },
+    { amount: fee, pk: hexToBytes(info.aggregator_pk), blind: w.generate_random_blind(randomBytes(32)) },
+  ]
+  const outBlob = concat(...outs.map((o) => concat(u64le(asset), u128le(o.amount), o.pk, o.blind)))
+  const apk = auditorPk(d)
+  const auditBlob = concat(
+    ...outs.map((o) => w.audit_memo_encrypt(asset, o.amount & ((1n << 64n) - 1n), o.amount >> 64n, o.pk, o.blind, apk, randomBytes(32))),
+  )
+  const shape = inputs.length === 2 ? '2x3' : '1x3'
+  onProgress(`Generating proof (${shape}, this can take a while)…`)
+  const { result: r, ms } = await prove<TransferResult>({
+    kind: 'transfer',
+    shape,
+    secret: key.secret,
+    inputs: inBlob,
+    outputs: outBlob,
+    auditorPk: apk,
+    auditMemos: auditBlob,
+  })
+  onProgress(`Proof ready in ${(ms / 1000).toFixed(1)} s, submitting to the aggregator…`)
+  const { id } = await submitTransfer({
+    shape,
+    proof: r.proof,
+    nullifiers: r.nullifiers,
+    freezers: r.freezers,
+    commitments: r.commitments,
+    root: r.merkle_root,
+    owner_memos: r.owner_memos,
+    audit_memos: r.audit_memos,
+  })
+  const status = await waitForTx(id, onProgress)
+  return (status.tx_hash ?? '0x') as Hex
+}
+
+/// Withdraw settled by the aggregator: the fee field pays the operator, no wallet transaction.
+export async function withdrawViaAggregator(
+  ctx: Ctx,
+  wallet: NoteSource,
+  utxo: Utxo,
+  recipient: Hex,
+  info: AggregatorInfo,
+  onProgress: Progress,
+): Promise<Hex> {
+  const { key } = ctx
+  const fee = BigInt(info.withdraw_fee)
+  if (fee > utxo.amount) throw new Error('note is smaller than the withdraw fee')
+  const { proofs: [mp], root } = await wallet.proofsFor([utxo.index])
+  onProgress('Generating proof (this can take a while)…')
+  const { result, ms } = await prove<{ proofEvm: Uint8Array }>({
+    kind: 'withdraw',
+    secret: key.secret,
+    asset: utxo.asset,
+    amount: utxo.amount,
+    recipient: addressToBytes(recipient),
+    fee,
+    inputBlind: utxo.blind,
+    ownerPk: key.pk,
+    merkleProof: mp,
+  })
+  onProgress(`Proof ready in ${(ms / 1000).toFixed(1)} s, submitting to the aggregator…`)
+  const { id } = await submitWithdraw({
+    proof: bytesToHex(result.proofEvm),
+    asset: Number(utxo.asset),
+    amount: utxo.amount.toString(),
+    nullifier: utxo.nullifier,
+    freezer: utxo.freezer,
+    root,
+    recipient,
+    fee: fee.toString(),
+  })
+  const status = await waitForTx(id, onProgress)
+  return (status.tx_hash ?? '0x') as Hex
 }

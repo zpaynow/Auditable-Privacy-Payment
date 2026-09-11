@@ -6,3 +6,7 @@ Cargo.lock
 artifacts/*.pk
 wasm/pkg/
 wasm/pkg-node/
+aggregator/*.sqlite*
+aggregator/.env
+auditor/*.sqlite*
+auditor/.env

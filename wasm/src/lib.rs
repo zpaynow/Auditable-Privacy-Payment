@@ -1020,3 +1020,29 @@ pub fn verify_message(pk: &[u8], msg: &[u8], sig: &[u8]) -> std::result::Result<
     let pk = parse_pk(pk)?;
     Ok(app_payment::verify_signature(&pk, msg, sig))
 }
+
+// =============================================================================
+// Payment address: 32-byte compressed public key
+// =============================================================================
+
+/// 64-byte x || y public key -> 32-byte compressed point (the user-facing payment address).
+#[wasm_bindgen]
+pub fn compress_pk(pk: &[u8]) -> std::result::Result<Vec<u8>, JsValue> {
+    let p = parse_pk(pk)?;
+    let mut out = vec![];
+    p.serialize_compressed(&mut out).map_err(js_err("compress"))?;
+    Ok(out)
+}
+
+/// 32-byte compressed point -> 64-byte x || y public key. Fails on an invalid encoding.
+#[wasm_bindgen]
+pub fn decompress_pk(addr: &[u8]) -> std::result::Result<Vec<u8>, JsValue> {
+    if addr.len() != 32 {
+        return Err(JsValue::from_str("payment address must be 32 bytes"));
+    }
+    let p = EdwardsAffine::deserialize_compressed(addr).map_err(js_err("not a valid payment address"))?;
+    let mut out = vec![];
+    p.x.serialize_compressed(&mut out).map_err(js_err("x"))?;
+    p.y.serialize_compressed(&mut out).map_err(js_err("y"))?;
+    Ok(out)
+}

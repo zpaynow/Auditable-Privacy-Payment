@@ -51,7 +51,7 @@ export function TransferForm({
     let dest: Uint8Array
     let amt: bigint
     try {
-      dest = parseZkAddress(to)
+      dest = await parseZkAddress(to)
       amt = parseAmount(amount, DECIMALS)
       if (amt <= 0n) throw new Error('amount must be positive')
     } catch (err) {
@@ -76,7 +76,7 @@ export function TransferForm({
       </p>
       <label>
         <span>Recipient payment address</span>
-        <input id="transfer-to" className="mono" value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x… (64 bytes)" spellCheck={false} />
+        <input id="transfer-to" className="mono" value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x… (64 hex characters)" spellCheck={false} />
       </label>
       <div className="row">
         <label>

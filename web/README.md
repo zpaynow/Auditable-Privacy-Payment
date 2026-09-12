@@ -29,7 +29,8 @@ auditor admin); `?devkey=0x…` uses an explicit private key. Open two tabs with
 http://localhost:5173/?dev=0
 ```
 
-Tabs: **Deposit** (get test tokens, shield), **Transfer** (send to a payment address),
+Payment addresses are 32-byte compressed BabyJubJub points (`0x` + 64 hex); the raw 64-byte
+public key is still accepted as input. Tabs: **Deposit** (get test tokens, shield), **Transfer** (send to a payment address),
 **Withdraw** (unshield one note), **Auditor** (paste the auditor secret, open every note, freeze).
 
 ## Auditor service (no chain scanning)

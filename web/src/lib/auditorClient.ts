@@ -61,7 +61,7 @@ export async function authHeader(key: ZkKey, chainId: number, app: string): Prom
   const ts = Math.floor(Date.now() / 1000)
   const msg = `APP-auditor-auth-v1\n${chainId}\n${app.toLowerCase()}\n${ts}`
   const sig = w.sign_message(key.secret, new TextEncoder().encode(msg))
-  return { 'X-APP-Auth': `${key.address}.${ts}.${bytesToHex(sig)}` }
+  return { 'X-APP-Auth': `${bytesToHex(key.pk)}.${ts}.${bytesToHex(sig)}` }
 }
 
 export async function getNotes(key: ZkKey, chainId: number, app: string): Promise<RemoteNote[]> {

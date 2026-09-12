@@ -12,5 +12,7 @@ node tests/smoke.mjs
 ```
 
 Byte conventions: field elements are 32-byte arkworks little-endian unless a function name says `evm`
-(big-endian `bytes32`). Public keys are `x || y` (64 bytes). Amounts are `u128` passed as two `u64`s.
+(big-endian `bytes32`). Public keys are `x || y` (64 bytes) internally; the user-facing payment
+address is the 32-byte compressed point (`compress_pk` / `decompress_pk`). Amounts are `u128`
+passed as two `u64`s.
 Merkle proof blob = nodes (20 × 64) || root (32) || version (4 LE) || index (4 LE) || ledger (4 LE).

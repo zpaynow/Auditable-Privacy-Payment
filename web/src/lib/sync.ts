@@ -275,7 +275,7 @@ export interface AuditRow {
   asset: bigint
   amount: bigint
   ownerX: Hex // LE hex as stored in wasm pk
-  ownerAddress: Hex // 64-byte payment address
+  ownerAddress: Hex // 32-byte compressed payment address
   freezer: Hex // BE
   blockNumber: bigint
 }
@@ -309,13 +309,19 @@ export async function auditScan(
       const pk = new Uint8Array(64)
       pk.set(ownerX, 0)
       pk.set(ownerY, 32)
+      let ownerAddress: Hex
+      try {
+        ownerAddress = bytesToHex(w.compress_pk(pk))
+      } catch {
+        ownerAddress = bytesToHex(pk)
+      }
       rows.push({
         index: l.index,
         commitment: bytesToHex(bigintToBe32(l.commitment)),
         asset,
         amount,
         ownerX: bytesToHex(ownerX),
-        ownerAddress: bytesToHex(pk),
+        ownerAddress,
         freezer,
         blockNumber: l.blockNumber,
       })

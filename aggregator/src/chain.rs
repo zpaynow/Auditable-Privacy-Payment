@@ -66,6 +66,7 @@ fn words(hex: &str) -> Result<[U256; 8]> {
 
 impl Chain {
     pub async fn connect(rpc: &str, app: Address, operator_key: &str) -> Result<Self> {
+        // one provider + signer per chain
         let signer: PrivateKeySigner = operator_key.parse().context("OPERATOR_KEY")?;
         let operator = signer.address();
         let wallet = EthereumWallet::from(signer);

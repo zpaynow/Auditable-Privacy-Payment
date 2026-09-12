@@ -211,7 +211,7 @@ export class RemoteWallet implements NoteSource {
   async sync(): Promise<SyncState> {
     if (!this.w) this.w = await loadWasm()
     const w = this.w
-    const [status, notes] = await Promise.all([getStatus(), getNotes(this.key, this.chainId, this.app)])
+    const [status, notes] = await Promise.all([getStatus(this.chainId), getNotes(this.key, this.chainId, this.app)])
     const known = new Map(this.utxos.map((u) => [u.index, u]))
     for (const n of notes) {
       if (known.has(n.index)) {
@@ -244,7 +244,7 @@ export class RemoteWallet implements NoteSource {
     this.utxos.sort((a, b) => a.index - b.index)
     const live = this.utxos.filter((u) => !u.spent)
     if (live.length) {
-      const spent = await checkNullifiers(live.map((u) => u.nullifier))
+      const spent = await checkNullifiers(this.chainId, live.map((u) => u.nullifier))
       live.forEach((u, i) => (u.spent = spent[i]))
     }
     return {

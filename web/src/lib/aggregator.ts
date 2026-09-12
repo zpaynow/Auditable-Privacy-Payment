@@ -42,8 +42,8 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return json as T
 }
 
-export function getInfo(): Promise<AggregatorInfo> {
-  return call<AggregatorInfo>('/info')
+export function getInfo(chainId: number): Promise<AggregatorInfo> {
+  return call<AggregatorInfo>(`/chains/${chainId}/info`)
 }
 
 export interface TransferSubmit {
@@ -68,23 +68,23 @@ export interface WithdrawSubmit {
   fee: string
 }
 
-export function submitTransfer(t: TransferSubmit): Promise<{ id: number }> {
-  return call('/tx/transfer', t)
+export function submitTransfer(chainId: number, t: TransferSubmit): Promise<{ id: number }> {
+  return call(`/chains/${chainId}/tx/transfer`, t)
 }
 
-export function submitWithdraw(w: WithdrawSubmit): Promise<{ id: number }> {
-  return call('/tx/withdraw', w)
+export function submitWithdraw(chainId: number, w: WithdrawSubmit): Promise<{ id: number }> {
+  return call(`/chains/${chainId}/tx/withdraw`, w)
 }
 
-export function getTx(id: number): Promise<TxStatus> {
-  return call(`/tx/${id}`)
+export function getTx(chainId: number, id: number): Promise<TxStatus> {
+  return call(`/chains/${chainId}/tx/${id}`)
 }
 
 /** Poll until the aggregator has settled the tx on-chain. */
-export async function waitForTx(id: number, onProgress: (s: string) => void, timeoutMs = 10 * 60_000): Promise<TxStatus> {
+export async function waitForTx(chainId: number, id: number, onProgress: (s: string) => void, timeoutMs = 10 * 60_000): Promise<TxStatus> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
-    const s = await getTx(id)
+    const s = await getTx(chainId, id)
     if (s.status === 'confirmed') return s
     if (s.status === 'failed') throw new Error(`aggregator rejected the transaction: ${s.error ?? 'unknown error'}`)
     onProgress(s.status === 'submitted' ? `Batch ${s.batch_id} sent, waiting for confirmation…` : `Queued at the aggregator (#${id}), waiting for the next batch…`)

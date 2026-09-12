@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useChainId, useConnect, useDisconnect, usePublicClient, useSignMessage, useSwitchChain, useWalletClient } from 'wagmi'
 import type { Hex } from './lib/encoding'
-import { deployments, ZK_KEY_MESSAGE, chains, tokenAbi, type TokenMeta } from './lib/config'
+import { deployments, ZK_KEY_MESSAGE, chains, chainGroupLabel, tokenAbi, type TokenMeta } from './lib/config'
 import { forgetKey, keyFromSeed, recallKey, rememberKey, type ZkKey } from './lib/keys'
 import { RemoteWallet, ShieldedWallet, type NoteSource, type SyncState } from './lib/sync'
 import { getStatus } from './lib/auditorClient'
@@ -74,7 +74,7 @@ export default function App() {
     setSyncError(null)
     if (!key || !publicClient || !deployment) return
     let alive = true
-    getStatus()
+    getStatus(chainId)
       .then((st) => {
         if (!alive) return
         if (st.chain_id === chainId && st.app.toLowerCase() === deployment.app.toLowerCase()) {
@@ -148,7 +148,7 @@ export default function App() {
       <header className="top">
         <div className="brand">
           <h1>Auditable Privacy Payment</h1>
-          <small>testnet</small>
+          <small>{chainGroupLabel === 'default' ? 'testnet' : chainGroupLabel}</small>
         </div>
         <div className="wallet">
           {isConnected ? (

@@ -65,7 +65,7 @@ function auth(sh) {
 async function waitIndexed() {
   const head = await pub.getBlockNumber()
   for (let i = 0; i < 30; i++) {
-    const s = await api('/status')
+    const s = await api('/chains/31337/status')
     if (BigInt(s.indexed_block ?? 0) >= head) return s
     await sleep(500)
   }
@@ -76,7 +76,7 @@ class Remote {
   constructor(kp) { this.sk = kp.secret_key(); this.pk = kp.public_key(); this.utxos = [] }
   async sync() {
     await waitIndexed()
-    const notes = await api('/notes', { headers: auth(this) })
+    const notes = await api('/chains/31337/notes', { headers: auth(this) })
     const known = new Set(this.utxos.map((u) => u.index))
     for (const n of notes) {
       if (known.has(n.index)) continue
@@ -89,14 +89,14 @@ class Remote {
     }
     const live = this.utxos.filter((u) => !u.spent)
     if (live.length) {
-      const { spent } = await api('/nullifiers/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nullifiers: live.map((u) => u.nullifier) }) })
+      const { spent } = await api('/chains/31337/nullifiers/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nullifiers: live.map((u) => u.nullifier) }) })
       live.forEach((u, i) => (u.spent = spent[i]))
     }
     return this.utxos.filter((u) => !u.spent)
   }
   async proofsFor(indices) {
     const ps = []
-    for (const i of indices) ps.push(await api(`/proof/${i}`, { headers: auth(this) }))
+    for (const i of indices) ps.push(await api(`/chains/31337/proof/${i}`, { headers: auth(this) }))
     assert(ps.every((p) => p.root === ps[0].root), 'same root')
     return { proofs: ps.map((p) => hexToBuf(p.proof)), root: ps[0].root }
   }
@@ -135,7 +135,7 @@ async function withdraw(wallet, sh, u, recipient) {
 const bal = (a) => pub.readContract({ address: dep.token, abi: tokenAbi, functionName: 'balanceOf', args: [a] })
 
 // ------------------------------------------------------------------- flow
-const status = await api('/status')
+const status = await api('/chains/31337/status')
 console.log('auditor service:', status)
 assert(status.app.toLowerCase() === dep.app.toLowerCase(), 'service points at our deployment')
 
@@ -147,10 +147,10 @@ await tx(aliceW, { address: dep.token, abi: tokenAbi, functionName: 'approve', a
 
 console.log('0. unauthenticated / wrong-key requests are rejected')
 let rejected = false
-try { await api('/notes') } catch { rejected = true }
+try { await api('/chains/31337/notes') } catch { rejected = true }
 assert(rejected, 'no header -> 401')
 rejected = false
-try { const h = auth(alice); h['X-APP-Auth'] = h['X-APP-Auth'].replace(/.$/, (c) => (c === '0' ? '1' : '0')); await api('/notes', { headers: h }) } catch { rejected = true }
+try { const h = auth(alice); h['X-APP-Auth'] = h['X-APP-Auth'].replace(/.$/, (c) => (c === '0' ? '1' : '0')); await api('/chains/31337/notes', { headers: h }) } catch { rejected = true }
 assert(rejected, 'tampered signature -> 401')
 
 console.log('1. alice deposits 600 + 400, syncs through the service')
@@ -175,7 +175,7 @@ bobLive = await bob.sync()
 assert(bobLive.length === 0, 'bob note spent')
 
 console.log('4. admin view lists everything')
-const all = await api('/audit/notes?limit=1000', { headers: { 'x-admin-token': process.env.ADMIN_TOKEN ?? 'dev' } })
+const all = await api('/chains/31337/audit/notes?limit=1000', { headers: { 'x-admin-token': process.env.ADMIN_TOKEN ?? 'dev' } })
 const mine = all.filter((n) => n.owner === hex(alice.pk) || n.owner === hex(bob.pk))
 assert(mine.length === 4, `auditor attributes 4 notes to alice/bob (got ${mine.length})`)
 console.log('  total notes indexed:', all.length)

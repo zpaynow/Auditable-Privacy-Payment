@@ -57,7 +57,7 @@ async function api(path, body) {
 }
 async function waitTx(id) {
   for (let i = 0; i < 120; i++) {
-    const s = await api(`/tx/${id}`)
+    const s = await api(`/chains/31337/tx/${id}`)
     if (s.status === 'confirmed') return s
     if (s.status === 'failed') throw new Error(`tx ${id} failed: ${s.error}`)
     await sleep(1000)
@@ -117,7 +117,7 @@ async function transferViaAggregator(sh, inputs, toPk, amount, info) {
   const t0 = Date.now()
   const r = w.transfer_prove(loadPk(`transfer_${shape}`), sh.sk, inBlob, outBlob, auditorPk, auditBlob, rnd())
   console.log(`  prove ${shape}: ${Date.now() - t0} ms`)
-  const res = await api('/tx/transfer', {
+  const res = await api('/chains/31337/tx/transfer', {
     shape, proof: r.proof, nullifiers: r.nullifiers, freezers: r.freezers, commitments: r.commitments,
     root: r.merkle_root, owner_memos: r.owner_memos, audit_memos: r.audit_memos,
   })
@@ -129,7 +129,7 @@ async function withdrawViaAggregator(sh, u, recipient, info) {
   const fee = BigInt(info.withdraw_fee)
   const mp = Buffer.from(sh.tree.proof(u.index))
   const proof = w.withdraw_prove(loadPk('withdraw'), sh.sk, u.asset, lo(u.amount), hi(u.amount), hexToBuf(recipient), lo(fee), hi(fee), u.asset, lo(u.amount), hi(u.amount), sh.pk, u.blind, mp.subarray(0, 1280), mp.readUInt32LE(1320), mp.subarray(1280, 1312), mp.readUInt32LE(1312), mp.readUInt32LE(1316), rnd())
-  const res = await api('/tx/withdraw', {
+  const res = await api('/chains/31337/tx/withdraw', {
     proof: hex(w.proof_to_evm(proof)), asset: Number(u.asset), amount: u.amount.toString(), nullifier: u.nullifier, freezer: u.freezer,
     root: sh.root(), recipient, fee: fee.toString(),
   })
@@ -140,7 +140,7 @@ async function withdrawViaAggregator(sh, u, recipient, info) {
 const bal = (a) => pub.readContract({ address: dep.token, abi: tokenAbi, functionName: 'balanceOf', args: [a] })
 
 // ------------------------------------------------------------------- flow
-const info = await api('/info')
+const info = await api('/chains/31337/info')
 console.log('aggregator:', info)
 assert(info.app.toLowerCase() === dep.app.toLowerCase(), 'aggregator points at our deployment')
 const transferFee = BigInt(info.transfer_fee), withdrawFee = BigInt(info.withdraw_fee)
@@ -175,7 +175,7 @@ assert((await bal(info.operator)) - opBefore === withdrawFee, 'operator got the 
 
 console.log('4. batches and aggregated proofs')
 for (const id of new Set([t1.batch_id, t2.batch_id])) {
-  const b = await api(`/batch/${id}`)
+  const b = await api(`/chains/31337/batch/${id}`)
   console.log(`  batch ${id}: ${b.status}, transfers ${b.transfers}, withdraws ${b.withdraws}, tx ${b.tx_hash}`)
   for (const a of b.aggregated) {
     const r = await fetch(AGG + a.url)

@@ -1,7 +1,7 @@
 //! Follows the APP contract's events, opens every audit memo, and maintains the commitment tree.
-use crate::{AppState, db::Note};
+use crate::{ChainCtx, db::Note};
 use alloy::{
-    primitives::{Address, B256, U256},
+    primitives::{B256, U256},
     providers::Provider,
     rpc::types::Filter,
     sol,
@@ -45,24 +45,25 @@ fn open_audit_memo(auditor: &Keypair, commitment: Fr, memo: &[u8]) -> Option<(St
     Some((format!("0x{}", hex::encode(pk)), oc.asset, oc.amount, be_hex(&freezer)))
 }
 
-pub async fn run(state: Arc<AppState>) {
+pub async fn run(ctx: Arc<ChainCtx>) {
     loop {
-        if let Err(e) = step(&state).await {
-            tracing::warn!("indexer: {e:#}");
+        if let Err(e) = step(&ctx).await {
+            tracing::warn!(chain_id = ctx.cfg.chain_id, "indexer: {e:#}");
         }
-        tokio::time::sleep(Duration::from_secs(state.cfg.poll_secs)).await;
+        tokio::time::sleep(Duration::from_secs(ctx.cfg.poll_secs)).await;
     }
 }
 
-async fn step(state: &Arc<AppState>) -> Result<()> {
+async fn step(state: &Arc<ChainCtx>) -> Result<()> {
+    let chain_id = state.cfg.chain_id;
     let head = state.provider.get_block_number().await.context("block number")?;
-    let mut from = match state.db.indexed_block()? {
+    let mut from = match state.db.indexed_block(chain_id)? {
         Some(b) => b + 1,
         None => state.cfg.deploy_block,
     };
     while from <= head {
         let to = (from + CHUNK - 1).min(head);
-        let filter = Filter::new().address(state.cfg.app).from_block(from).to_block(to);
+        let filter = Filter::new().address(state.app).from_block(from).to_block(to);
         let logs = state.provider.get_logs(&filter).await.context("get_logs")?;
         let mut new_leaves: Vec<Fr> = vec![];
         for log in logs {
@@ -72,7 +73,7 @@ async fn step(state: &Arc<AppState>) -> Result<()> {
             if topic0 == APP::NewCommitment::SIGNATURE_HASH {
                 let ev = APP::NewCommitment::decode_log(&log.inner).context("NewCommitment")?;
                 let index: u32 = ev.index;
-                let expected = state.db.count_notes()?;
+                let expected = state.db.count_notes(chain_id)?;
                 if index != expected {
                     anyhow::bail!("commitment index gap: have {expected}, got {index}");
                 }
@@ -83,6 +84,7 @@ async fn step(state: &Arc<AppState>) -> Result<()> {
                         (String::new(), 0, 0, String::new())
                     });
                 state.db.insert_note(&Note {
+                    chain_id,
                     index,
                     commitment: u256_hex(ev.commitment),
                     owner_memo: format!("0x{}", hex::encode(&ev.ownerMemo)),
@@ -98,10 +100,10 @@ async fn step(state: &Arc<AppState>) -> Result<()> {
                 new_leaves.push(comm_fr);
             } else if topic0 == APP::NewNullifier::SIGNATURE_HASH {
                 let ev = APP::NewNullifier::decode_log(&log.inner).context("NewNullifier")?;
-                state.db.insert_nullifier(&u256_hex(ev.nullifier), block, &tx)?;
+                state.db.insert_nullifier(chain_id, &u256_hex(ev.nullifier), block, &tx)?;
             } else if topic0 == APP::FrozenSet::SIGNATURE_HASH {
                 let ev = APP::FrozenSet::decode_log(&log.inner).context("FrozenSet")?;
-                state.db.set_frozen(&u256_hex(ev.freezer), ev.isFrozen, block)?;
+                state.db.set_frozen(chain_id, &u256_hex(ev.freezer), ev.isFrozen, block)?;
             }
         }
         if !new_leaves.is_empty() {
@@ -110,14 +112,10 @@ async fn step(state: &Arc<AppState>) -> Result<()> {
                 tree.add_leaf(*leaf).map_err(|e| anyhow::anyhow!("tree: {e:?}"))?;
             }
             tree.commit().map_err(|e| anyhow::anyhow!("tree commit: {e:?}"))?;
-            tracing::info!(leaves = new_leaves.len(), total = tree.get_count(), to, "indexed");
+            tracing::info!(chain_id, leaves = new_leaves.len(), total = tree.get_count(), to, "indexed");
         }
-        state.db.set_indexed_block(to)?;
+        state.db.set_indexed_block(chain_id, to)?;
         from = to + 1;
     }
     Ok(())
-}
-
-pub fn app_address(s: &str) -> Result<Address> {
-    s.parse().context("APP_ADDRESS")
 }

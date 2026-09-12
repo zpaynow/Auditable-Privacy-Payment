@@ -7,7 +7,7 @@ export function useAggregator(chainId: number) {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    getInfo()
+    getInfo(chainId)
       .then((i) => {
         if (!alive) return
         if (i.chain_id !== chainId) {

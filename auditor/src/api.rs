@@ -1,6 +1,7 @@
-//! HTTP API. Note queries are authenticated with a Schnorr signature by the payment key, so
-//! only the holder of a key can list its notes; nullifiers and the tree are public data.
-use crate::AppState;
+//! HTTP API, scoped per chain: `/chains/{chain_id}/…`. Note queries are authenticated with a
+//! Schnorr signature by the payment key, so only the holder of a key can list its notes;
+//! nullifiers and the tree are public data.
+use crate::{AppState, ChainCtx};
 use app_payment::{PublicKey, verify_signature};
 use ark_bn254::Fr;
 use ark_ff::{BigInteger, PrimeField};
@@ -25,14 +26,19 @@ fn err(code: StatusCode, msg: impl ToString) -> Err {
     (code, Json(ApiError { error: msg.to_string() }))
 }
 
+fn chain_of(s: &AppState, id: u64) -> Result<Arc<ChainCtx>, Err> {
+    s.chain(id).ok_or_else(|| err(StatusCode::NOT_FOUND, format!("chain {id} is not served by this auditor")))
+}
+
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/status", get(status))
-        .route("/auth/message", get(auth_message))
-        .route("/notes", get(notes))
-        .route("/proof/{index}", get(proof))
-        .route("/nullifiers/check", post(nullifiers_check))
-        .route("/audit/notes", get(audit_notes))
+        .route("/chains", get(chains))
+        .route("/chains/{chain_id}/status", get(status))
+        .route("/chains/{chain_id}/auth/message", get(auth_message))
+        .route("/chains/{chain_id}/notes", get(notes))
+        .route("/chains/{chain_id}/proof/{index}", get(proof))
+        .route("/chains/{chain_id}/nullifiers/check", post(nullifiers_check))
+        .route("/chains/{chain_id}/audit/notes", get(audit_notes))
         .with_state(state)
 }
 
@@ -50,7 +56,7 @@ fn now() -> u64 {
 }
 
 /// Returns the authenticated owner key as 64-byte x||y LE hex.
-fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<String, Err> {
+fn authenticate(c: &ChainCtx, headers: &HeaderMap) -> Result<String, Err> {
     let h = headers
         .get("x-app-auth")
         .and_then(|v| v.to_str().ok())
@@ -72,7 +78,7 @@ fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<String, Err> {
     let x = Fr::deserialize_compressed(&pk_bytes[..32]).map_err(|_| err(StatusCode::UNAUTHORIZED, "bad pk"))?;
     let y = Fr::deserialize_compressed(&pk_bytes[32..]).map_err(|_| err(StatusCode::UNAUTHORIZED, "bad pk"))?;
     let pk = PublicKey::new_unchecked(x, y);
-    let msg = auth_string(state.chain_id, &format!("{:?}", state.cfg.app), ts);
+    let msg = auth_string(c.cfg.chain_id, &format!("{:?}", c.app), ts);
     if !verify_signature(&pk, msg.as_bytes(), &sig) {
         return Err(err(StatusCode::UNAUTHORIZED, "invalid signature"));
     }
@@ -80,7 +86,7 @@ fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<String, Err> {
 }
 
 fn admin(state: &AppState, headers: &HeaderMap) -> Result<(), Err> {
-    let Some(expected) = state.cfg.admin_token.as_deref().filter(|t| !t.is_empty()) else {
+    let Some(expected) = state.admin_token.as_deref() else {
         return Err(err(StatusCode::FORBIDDEN, "admin endpoints disabled (set ADMIN_TOKEN)"));
     };
     let got = headers.get("x-admin-token").and_then(|v| v.to_str().ok()).unwrap_or("");
@@ -92,6 +98,28 @@ fn admin(state: &AppState, headers: &HeaderMap) -> Result<(), Err> {
 
 // ------------------------------------------------------------ handlers
 #[derive(Serialize)]
+struct ChainSummary {
+    chain_id: u64,
+    app: String,
+    indexed_block: Option<u64>,
+    notes: u32,
+}
+
+async fn chains(State(s): State<Arc<AppState>>) -> Json<Vec<ChainSummary>> {
+    Json(
+        s.chains
+            .values()
+            .map(|c| ChainSummary {
+                chain_id: c.cfg.chain_id,
+                app: format!("{:?}", c.app),
+                indexed_block: s.db.indexed_block(c.cfg.chain_id).ok().flatten(),
+                notes: s.db.count_notes(c.cfg.chain_id).unwrap_or(0),
+            })
+            .collect(),
+    )
+}
+
+#[derive(Serialize)]
 struct Status {
     chain_id: u64,
     app: String,
@@ -102,17 +130,18 @@ struct Status {
     tree_version: u32,
 }
 
-async fn status(State(s): State<Arc<AppState>>) -> Result<Json<Status>, Err> {
+async fn status(State(s): State<Arc<AppState>>, Path(chain_id): Path<u64>) -> Result<Json<Status>, Err> {
+    let c = chain_of(&s, chain_id)?;
     let (root, version) = {
-        let t = s.tree.lock().unwrap();
+        let t = c.tree.lock().unwrap();
         (t.get_root().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?, t.get_version())
     };
     Ok(Json(Status {
-        chain_id: s.chain_id,
-        app: format!("{:?}", s.cfg.app),
-        indexed_block: s.db.indexed_block().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
-        notes: s.db.count_notes().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
-        nullifiers: s.db.count_nullifiers().map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
+        chain_id,
+        app: format!("{:?}", c.app),
+        indexed_block: s.db.indexed_block(chain_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
+        notes: s.db.count_notes(chain_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
+        nullifiers: s.db.count_nullifiers(chain_id).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
         root: format!("0x{}", hex::encode(root.into_bigint().to_bytes_be())),
         tree_version: version,
     }))
@@ -125,14 +154,16 @@ struct AuthMessage {
 }
 
 /// Convenience: the exact string to sign for the current time.
-async fn auth_message(State(s): State<Arc<AppState>>) -> Json<AuthMessage> {
+async fn auth_message(State(s): State<Arc<AppState>>, Path(chain_id): Path<u64>) -> Result<Json<AuthMessage>, Err> {
+    let c = chain_of(&s, chain_id)?;
     let ts = now();
-    Json(AuthMessage { ts, message: auth_string(s.chain_id, &format!("{:?}", s.cfg.app), ts) })
+    Ok(Json(AuthMessage { ts, message: auth_string(chain_id, &format!("{:?}", c.app), ts) }))
 }
 
-async fn notes(State(s): State<Arc<AppState>>, headers: HeaderMap) -> Result<impl IntoResponse, Err> {
-    let owner = authenticate(&s, &headers)?;
-    let notes = s.db.notes_of(&owner).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+async fn notes(State(s): State<Arc<AppState>>, Path(chain_id): Path<u64>, headers: HeaderMap) -> Result<impl IntoResponse, Err> {
+    let c = chain_of(&s, chain_id)?;
+    let owner = authenticate(&c, &headers)?;
+    let notes = s.db.notes_of(chain_id, &owner).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(notes))
 }
 
@@ -147,9 +178,14 @@ struct ProofView {
     count: u32,
 }
 
-async fn proof(State(s): State<Arc<AppState>>, headers: HeaderMap, Path(index): Path<u32>) -> Result<Json<ProofView>, Err> {
-    let _owner = authenticate(&s, &headers)?;
-    let t = s.tree.lock().unwrap();
+async fn proof(
+    State(s): State<Arc<AppState>>,
+    Path((chain_id, index)): Path<(u64, u32)>,
+    headers: HeaderMap,
+) -> Result<Json<ProofView>, Err> {
+    let c = chain_of(&s, chain_id)?;
+    let _owner = authenticate(&c, &headers)?;
+    let t = c.tree.lock().unwrap();
     if index >= t.get_count() {
         return Err(err(StatusCode::NOT_FOUND, "no such leaf yet"));
     }
@@ -173,13 +209,18 @@ struct CheckResp {
     spent: Vec<bool>,
 }
 
-async fn nullifiers_check(State(s): State<Arc<AppState>>, Json(req): Json<CheckReq>) -> Result<Json<CheckResp>, Err> {
+async fn nullifiers_check(
+    State(s): State<Arc<AppState>>,
+    Path(chain_id): Path<u64>,
+    Json(req): Json<CheckReq>,
+) -> Result<Json<CheckResp>, Err> {
+    chain_of(&s, chain_id)?;
     if req.nullifiers.len() > 1000 {
         return Err(err(StatusCode::BAD_REQUEST, "at most 1000 nullifiers per request"));
     }
     let mut spent = Vec::with_capacity(req.nullifiers.len());
     for n in &req.nullifiers {
-        spent.push(s.db.nullifier_spent(&n.to_lowercase()).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?);
+        spent.push(s.db.nullifier_spent(chain_id, &n.to_lowercase()).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?);
     }
     Ok(Json(CheckResp { spent }))
 }
@@ -190,11 +231,17 @@ struct Page {
     limit: Option<u32>,
 }
 
-async fn audit_notes(State(s): State<Arc<AppState>>, headers: HeaderMap, Query(p): Query<Page>) -> Result<impl IntoResponse, Err> {
+async fn audit_notes(
+    State(s): State<Arc<AppState>>,
+    Path(chain_id): Path<u64>,
+    headers: HeaderMap,
+    Query(p): Query<Page>,
+) -> Result<impl IntoResponse, Err> {
+    chain_of(&s, chain_id)?;
     admin(&s, &headers)?;
     let notes = s
         .db
-        .all_notes(p.offset.unwrap_or(0), p.limit.unwrap_or(200).min(1000))
+        .all_notes(chain_id, p.offset.unwrap_or(0), p.limit.unwrap_or(200).min(1000))
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(notes))
 }

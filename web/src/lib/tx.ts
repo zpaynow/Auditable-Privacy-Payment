@@ -354,7 +354,8 @@ export async function transferViaAggregator(
     auditMemos: auditBlob,
   })
   onProgress(`Proof ready in ${(ms / 1000).toFixed(1)} s, submitting to the aggregator…`)
-  const { id } = await submitTransfer({
+  const chainId = ctx.publicClient.chain?.id ?? 0
+  const { id } = await submitTransfer(chainId, {
     shape,
     proof: r.proof,
     nullifiers: r.nullifiers,
@@ -364,7 +365,7 @@ export async function transferViaAggregator(
     owner_memos: r.owner_memos,
     audit_memos: r.audit_memos,
   })
-  const status = await waitForTx(id, onProgress)
+  const status = await waitForTx(chainId, id, onProgress)
   return (status.tx_hash ?? '0x') as Hex
 }
 
@@ -394,7 +395,8 @@ export async function withdrawViaAggregator(
     merkleProof: mp,
   })
   onProgress(`Proof ready in ${(ms / 1000).toFixed(1)} s, submitting to the aggregator…`)
-  const { id } = await submitWithdraw({
+  const chainId = ctx.publicClient.chain?.id ?? 0
+  const { id } = await submitWithdraw(chainId, {
     proof: bytesToHex(result.proofEvm),
     asset: Number(utxo.asset),
     amount: utxo.amount.toString(),
@@ -404,6 +406,6 @@ export async function withdrawViaAggregator(
     recipient,
     fee: fee.toString(),
   })
-  const status = await waitForTx(id, onProgress)
+  const status = await waitForTx(chainId, id, onProgress)
   return (status.tx_hash ?? '0x') as Hex
 }

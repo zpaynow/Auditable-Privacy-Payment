@@ -39,7 +39,9 @@ forge test
      --rpc-url http://127.0.0.1:8545 --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 --broadcast
    ```
 
-3. Base Sepolia (deployer needs ~0.02 ETH; the script uses ~10M gas):
+3. BOTChain Testnet (default network of the web app; chain id 968, native token BOT, explorer
+   https://scan.bohr.life) — or Base Sepolia with `--rpc-url https://sepolia.base.org`. The
+   script uses ~10M gas:
 
    ```sh
    export PK=0x…                       # funded deployer key
@@ -48,12 +50,12 @@ forge test
    # optional: OPERATOR=0x…      (address allowed to call submitBatch, default deployer;
    #                              must be the aggregator's OPERATOR_KEY address)
    # optional: TOKEN=0x…         (register an existing ERC20 instead of deploying TestToken)
-   forge script script/Deploy.s.sol --rpc-url https://sepolia.base.org --private-key $PK --broadcast
+   forge script script/Deploy.s.sol --rpc-url https://rpc.bohr.life --private-key $PK --broadcast
    # verify sources (optional):
    #   forge script … --verify --etherscan-api-key $BASESCAN_KEY
    ```
 
-   Output: `deployments/84532.json` (commit it). Then `cd ../web && ./scripts/sync.sh` so the web
+   Output: `deployments/968.json` (or `84532.json` for Base Sepolia; commit it). Then `cd ../web && ./scripts/sync.sh` so the web
    app and the aggregator pick up the addresses and ABI. More operators can be added later with
    `cast send $APP "setOperator(address,bool)" $OP true`. Anyone with the same `app-tools setup` seed gets identical proving keys, so
    `web/public/keys` always matches the deployed verifiers.

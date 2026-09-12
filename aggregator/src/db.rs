@@ -7,6 +7,7 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Serialize)]
 pub struct TxRow {
     pub id: i64,
+    pub chain_id: u64,
     pub kind: String,
     pub status: String,
     pub batch_id: Option<i64>,
@@ -18,6 +19,7 @@ pub struct TxRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchRow {
     pub id: i64,
+    pub chain_id: u64,
     pub status: String,
     pub tx_hash: Option<String>,
     pub transfers: i64,
@@ -35,6 +37,7 @@ impl Db {
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS txs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
                 kind TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -43,13 +46,16 @@ impl Db {
                 error TEXT,
                 created_at INTEGER NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS txs_status ON txs(status);
+             CREATE INDEX IF NOT EXISTS txs_status ON txs(chain_id, status);
              CREATE TABLE IF NOT EXISTS nullifiers (
-                nullifier TEXT PRIMARY KEY,
-                tx_id INTEGER NOT NULL
+                chain_id INTEGER NOT NULL,
+                nullifier TEXT NOT NULL,
+                tx_id INTEGER NOT NULL,
+                PRIMARY KEY (chain_id, nullifier)
              );
              CREATE TABLE IF NOT EXISTS batches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 tx_hash TEXT,
                 transfers INTEGER NOT NULL,
@@ -76,14 +82,14 @@ impl Db {
     }
 
     /// Insert a pending tx and reserve its nullifiers. Fails if a nullifier is already queued.
-    pub fn insert_tx(&self, kind: &str, payload: &str, nullifiers: &[String]) -> Result<i64> {
+    pub fn insert_tx(&self, chain_id: u64, kind: &str, payload: &str, nullifiers: &[String]) -> Result<i64> {
         let c = self.0.lock().unwrap();
         let tx = c.unchecked_transaction()?;
         for n in nullifiers {
             let used: Option<i64> = tx
                 .query_row(
-                    "SELECT t.id FROM nullifiers n JOIN txs t ON t.id = n.tx_id WHERE n.nullifier = ?1 AND t.status IN ('pending','submitted','confirmed')",
-                    params![n],
+                    "SELECT t.id FROM nullifiers n JOIN txs t ON t.id = n.tx_id WHERE n.chain_id = ?1 AND n.nullifier = ?2 AND t.status IN ('pending','submitted','confirmed')",
+                    params![chain_id as i64, n],
                     |r| r.get(0),
                 )
                 .optional()?;
@@ -92,50 +98,51 @@ impl Db {
             }
         }
         tx.execute(
-            "INSERT INTO txs (kind, payload, status, created_at) VALUES (?1, ?2, 'pending', ?3)",
-            params![kind, payload, Self::now()],
+            "INSERT INTO txs (chain_id, kind, payload, status, created_at) VALUES (?1, ?2, ?3, 'pending', ?4)",
+            params![chain_id as i64, kind, payload, Self::now()],
         )?;
         let id = tx.last_insert_rowid();
         for n in nullifiers {
-            tx.execute("INSERT OR REPLACE INTO nullifiers (nullifier, tx_id) VALUES (?1, ?2)", params![n, id])?;
+            tx.execute("INSERT OR REPLACE INTO nullifiers (chain_id, nullifier, tx_id) VALUES (?1, ?2, ?3)", params![chain_id as i64, n, id])?;
         }
         tx.commit()?;
         Ok(id)
     }
 
-    pub fn get_tx(&self, id: i64) -> Result<Option<TxRow>> {
+    pub fn get_tx(&self, chain_id: u64, id: i64) -> Result<Option<TxRow>> {
         let c = self.0.lock().unwrap();
         Ok(c.query_row(
-            "SELECT id, kind, status, batch_id, tx_hash, error, created_at FROM txs WHERE id = ?1",
-            params![id],
+            "SELECT id, chain_id, kind, status, batch_id, tx_hash, error, created_at FROM txs WHERE id = ?1 AND chain_id = ?2",
+            params![id, chain_id as i64],
             |r| {
                 Ok(TxRow {
                     id: r.get(0)?,
-                    kind: r.get(1)?,
-                    status: r.get(2)?,
-                    batch_id: r.get(3)?,
-                    tx_hash: r.get(4)?,
-                    error: r.get(5)?,
-                    created_at: r.get(6)?,
+                    chain_id: r.get::<_, i64>(1)? as u64,
+                    kind: r.get(2)?,
+                    status: r.get(3)?,
+                    batch_id: r.get(4)?,
+                    tx_hash: r.get(5)?,
+                    error: r.get(6)?,
+                    created_at: r.get(7)?,
                 })
             },
         )
         .optional()?)
     }
 
-    /// (id, kind, payload) of pending txs, oldest first.
-    pub fn pending(&self, limit: usize) -> Result<Vec<(i64, String, String)>> {
+    /// (id, kind, payload) of pending txs for one chain, oldest first.
+    pub fn pending(&self, chain_id: u64, limit: usize) -> Result<Vec<(i64, String, String)>> {
         let c = self.0.lock().unwrap();
-        let mut st = c.prepare("SELECT id, kind, payload FROM txs WHERE status = 'pending' ORDER BY id LIMIT ?1")?;
+        let mut st = c.prepare("SELECT id, kind, payload FROM txs WHERE chain_id = ?1 AND status = 'pending' ORDER BY id LIMIT ?2")?;
         let rows = st
-            .query_map(params![limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .query_map(params![chain_id as i64, limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
-    pub fn count_pending(&self) -> Result<i64> {
+    pub fn count_pending(&self, chain_id: u64) -> Result<i64> {
         let c = self.0.lock().unwrap();
-        Ok(c.query_row("SELECT COUNT(*) FROM txs WHERE status = 'pending'", [], |r| r.get(0))?)
+        Ok(c.query_row("SELECT COUNT(*) FROM txs WHERE chain_id = ?1 AND status = 'pending'", params![chain_id as i64], |r| r.get(0))?)
     }
 
     pub fn fail_tx(&self, id: i64, error: &str) -> Result<()> {
@@ -144,12 +151,12 @@ impl Db {
         Ok(())
     }
 
-    pub fn new_batch(&self, transfers: usize, withdraws: usize, tx_ids: &[i64]) -> Result<i64> {
+    pub fn new_batch(&self, chain_id: u64, transfers: usize, withdraws: usize, tx_ids: &[i64]) -> Result<i64> {
         let c = self.0.lock().unwrap();
         let tx = c.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO batches (status, transfers, withdraws, created_at) VALUES ('submitted', ?1, ?2, ?3)",
-            params![transfers as i64, withdraws as i64, Self::now()],
+            "INSERT INTO batches (chain_id, status, transfers, withdraws, created_at) VALUES (?1, 'submitted', ?2, ?3, ?4)",
+            params![chain_id as i64, transfers as i64, withdraws as i64, Self::now()],
         )?;
         let id = tx.last_insert_rowid();
         for t in tx_ids {
@@ -173,20 +180,21 @@ impl Db {
         Ok(())
     }
 
-    pub fn get_batch(&self, id: i64) -> Result<Option<BatchRow>> {
+    pub fn get_batch(&self, chain_id: u64, id: i64) -> Result<Option<BatchRow>> {
         let c = self.0.lock().unwrap();
         Ok(c.query_row(
-            "SELECT id, status, tx_hash, transfers, withdraws, error, created_at FROM batches WHERE id = ?1",
-            params![id],
+            "SELECT id, chain_id, status, tx_hash, transfers, withdraws, error, created_at FROM batches WHERE id = ?1 AND chain_id = ?2",
+            params![id, chain_id as i64],
             |r| {
                 Ok(BatchRow {
                     id: r.get(0)?,
-                    status: r.get(1)?,
-                    tx_hash: r.get(2)?,
-                    transfers: r.get(3)?,
-                    withdraws: r.get(4)?,
-                    error: r.get(5)?,
-                    created_at: r.get(6)?,
+                    chain_id: r.get::<_, i64>(1)? as u64,
+                    status: r.get(2)?,
+                    tx_hash: r.get(3)?,
+                    transfers: r.get(4)?,
+                    withdraws: r.get(5)?,
+                    error: r.get(6)?,
+                    created_at: r.get(7)?,
                 })
             },
         )

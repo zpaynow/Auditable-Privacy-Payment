@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "npm run build && npx wrangler pages deploy dist --project-name app-web"
+    "deploy": "npm run build && npx wrangler pages deploy dist --project-name botchain"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

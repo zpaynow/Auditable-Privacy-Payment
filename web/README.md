@@ -34,8 +34,8 @@ Tabs: **Deposit** (get test tokens, shield), **Transfer** (send to a payment add
 
 ## Auditor service (no chain scanning)
 
-If `auditor/` is running for the current chain (`VITE_AUDITOR_URL`, default
-`http://127.0.0.1:8788`) the wallet fetches its notes and Merkle proofs from it, authenticated
+If `auditor/` serves the current chain (`VITE_AUDITOR_URL`, default `http://127.0.0.1:8788`;
+the app calls `/chains/<chainId>/…`) the wallet fetches its notes and Merkle proofs from it, authenticated
 with a Schnorr signature by the payment key; the balance card shows "via auditor service".
 Otherwise it scans `NewCommitment` events itself and keeps a local tree ("from chain").
 
@@ -85,15 +85,21 @@ Git-integrated builds are possible only if you commit the generated inputs (`src
 The dev wallet (`?dev=` / `?devkey=`) targets a local anvil and is irrelevant in production;
 users connect MetaMask on Base Sepolia.
 
-## Testnet
+## Networks and hostnames
 
-The default network is **BOTChain Testnet** (chain id 968, RPC `https://rpc.bohr.life`, native
-token BOT, explorer `https://scan.bohr.life`); Base Sepolia is offered as well, and the local
-anvil chain only in dev builds. A chain appears in the selector only when
-`src/deployments/<chainId>.json` exists. Token symbol and decimals are read from the registered
-ERC20. On BOTChain the deposit tab links to the external faucet
-(`https://faucet.botchain.ai/en/basic`, see `faucets` in `src/lib/config.ts`); on chains without
-an entry it mints the deployed `TestToken` directly.
+`src/lib/config.ts` holds a registry of known chains (BOTChain 677, BOTChain Testnet 968,
+Base Sepolia, Sepolia, local anvil) and hostname groups:
+
+| hostname label | chains offered |
+| --- | --- |
+| `botchain.*` (e.g. `botchain.zpaynow.com`) | BOTChain, BOTChain Testnet |
+| anything else | Base Sepolia, Sepolia, anvil (dev builds only) |
+
+Only chains that have `src/deployments/<chainId>.json` are actually offered; the first offered
+chain is the default. `?chains=968,677` overrides the group for testing. To add a chain: define
+it in the registry, add it to a group (or a new group keyed by a subdomain label), deploy, run
+`scripts/sync.sh`. Token symbol and decimals are read from the registered ERC20; per-chain
+faucet links live in `faucets` (BOTChain Testnet → `https://faucet.botchain.ai/en/basic`).
 
 Deploy with a funded key (`--private-key`) and the testnet RPC (see `solidity/README.md`), then
 rerun `scripts/sync.sh`; the app picks up `src/deployments/<chainId>.json` automatically and

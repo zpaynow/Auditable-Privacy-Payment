@@ -51,8 +51,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T
 }
 
-export function getStatus(): Promise<AuditorStatus> {
-  return request('/status')
+export function getStatus(chainId: number): Promise<AuditorStatus> {
+  return request(`/chains/${chainId}/status`)
 }
 
 /** `X-APP-Auth: <pk>.<ts>.<sig>` over "APP-auditor-auth-v1\n{chainId}\n{app}\n{ts}" */
@@ -65,16 +65,16 @@ export async function authHeader(key: ZkKey, chainId: number, app: string): Prom
 }
 
 export async function getNotes(key: ZkKey, chainId: number, app: string): Promise<RemoteNote[]> {
-  return request('/notes', { headers: await authHeader(key, chainId, app) })
+  return request(`/chains/${chainId}/notes`, { headers: await authHeader(key, chainId, app) })
 }
 
 export async function getProof(key: ZkKey, chainId: number, app: string, index: number): Promise<RemoteProof> {
-  return request(`/proof/${index}`, { headers: await authHeader(key, chainId, app) })
+  return request(`/chains/${chainId}/proof/${index}`, { headers: await authHeader(key, chainId, app) })
 }
 
-export async function checkNullifiers(nullifiers: Hex[]): Promise<boolean[]> {
+export async function checkNullifiers(chainId: number, nullifiers: Hex[]): Promise<boolean[]> {
   if (nullifiers.length === 0) return []
-  const r = await request<{ spent: boolean[] }>('/nullifiers/check', {
+  const r = await request<{ spent: boolean[] }>(`/chains/${chainId}/nullifiers/check`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ nullifiers }),

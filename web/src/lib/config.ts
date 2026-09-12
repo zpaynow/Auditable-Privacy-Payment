@@ -1,5 +1,5 @@
 import { createConfig, http } from 'wagmi'
-import { baseSepolia } from 'wagmi/chains'
+import { baseSepolia, sepolia } from 'wagmi/chains'
 import { defineChain } from 'viem'
 import { injected } from 'wagmi/connectors'
 import appAbiJson from '../abi/APP.json'
@@ -13,7 +13,7 @@ export const anvil = defineChain({
   testnet: true,
 })
 
-/** BOTChain testnet — the default network. */
+/** BOTChain testnet. */
 export const botchainTestnet = defineChain({
   id: 968,
   name: 'BOTChain Testnet',
@@ -23,21 +23,39 @@ export const botchainTestnet = defineChain({
   testnet: true,
 })
 
-// first entry is the default; the local anvil chain is only offered in dev builds
-export const chains = (import.meta.env.DEV ? [botchainTestnet, baseSepolia, anvil] : [botchainTestnet, baseSepolia]) as unknown as readonly [
-  typeof botchainTestnet,
-  ...(typeof baseSepolia | typeof anvil)[],
-]
-
-export const wagmiConfig = createConfig({
-  chains,
-  connectors: [injected()],
-  transports: {
-    [botchainTestnet.id]: http('https://rpc.bohr.life'),
-    [baseSepolia.id]: http(),
-    [anvil.id]: http('http://127.0.0.1:8545'),
-  },
+/** BOTChain mainnet. */
+export const botchain = defineChain({
+  id: 677,
+  name: 'BOTChain',
+  nativeCurrency: { name: 'BOT', symbol: 'BOT', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.botchain.ai'] } },
+  blockExplorers: { default: { name: 'BOTChain Explorer', url: 'https://scan.botchain.ai' } },
 })
+
+/** Every chain the app knows how to talk to. Only chains with a deployment file are offered. */
+export const registry = [botchain, botchainTestnet, baseSepolia, sepolia, anvil] as const
+export type KnownChain = (typeof registry)[number]
+
+/**
+ * Hostname → chains. The first label of the hostname (e.g. `botchain` in
+ * `botchain.zpaynow.com`) selects a group; `?chains=968,677` overrides for testing; anything
+ * else gets the default group. Within a group the first chain with a deployment is the default.
+ */
+export const chainGroups: Record<string, number[]> = {
+  botchain: [botchain.id, botchainTestnet.id],
+  default: [baseSepolia.id, sepolia.id, anvil.id],
+}
+
+function selectChainIds(): number[] {
+  const params = new URLSearchParams(location.search)
+  const override = params.get('chains')
+  if (override) return override.split(',').map((x) => Number(x.trim())).filter(Boolean)
+  const labels = location.hostname.toLowerCase().split('.')
+  for (const label of labels) {
+    if (label in chainGroups && label !== 'default') return chainGroups[label]
+  }
+  return chainGroups.default
+}
 
 export interface Deployment {
   chainId: number
@@ -53,6 +71,29 @@ export interface Deployment {
 const deploymentFiles = import.meta.glob<Deployment>('../deployments/*.json', { eager: true, import: 'default' })
 export const deployments: Record<number, Deployment> = {}
 for (const d of Object.values(deploymentFiles)) deployments[Number(d.chainId)] = d
+
+/** The chains offered on this host: the host's group, restricted to chains that have a deployment
+ *  (anvil only in dev builds). Falls back to every deployed chain, then to the whole registry. */
+export const selectedChainIds = selectChainIds()
+function pickChains(): KnownChain[] {
+  const deployed = (id: number) => id in deployments && (import.meta.env.DEV || id !== anvil.id)
+  const byId = (id: number) => registry.find((c) => c.id === id)
+  let list = selectedChainIds.map(byId).filter((c): c is KnownChain => !!c && deployed(c.id))
+  if (list.length === 0) list = registry.filter((c) => deployed(c.id))
+  if (list.length === 0) list = [...registry]
+  return list
+}
+export const chains = pickChains() as unknown as readonly [KnownChain, ...KnownChain[]]
+
+/** Human label for the selected group (shown in the header). */
+export const chainGroupLabel: string =
+  Object.entries(chainGroups).find(([, ids]) => ids.join() === selectedChainIds.join())?.[0] ?? 'custom'
+
+export const wagmiConfig = createConfig({
+  chains,
+  connectors: [injected()],
+  transports: Object.fromEntries(registry.map((c) => [c.id, http(c.rpcUrls.default.http[0])])) as Record<number, ReturnType<typeof http>>,
+})
 
 export const appAbi = appAbiJson as unknown as readonly unknown[]
 export const tokenAbi = tokenAbiJson as unknown as readonly unknown[]

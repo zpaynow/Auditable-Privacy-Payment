@@ -1,6 +1,6 @@
-//! Batch loop: collect pending txs, re-check them against the chain, submit, fold.
+//! Batch loop, one per chain: collect pending txs, re-check them against the chain, submit, fold.
 use crate::{
-    AppState,
+    AppState, ChainCtx,
     api::{TransferSubmit, WithdrawSubmit},
     chain::Chain,
     verify::{Checked, Group},
@@ -9,27 +9,29 @@ use ark_serialize::CanonicalSerialize;
 use snarkfold::{Aggregator, GrothVerifyingKey, Instance, Proof as SfProof};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-pub async fn run(state: Arc<AppState>) {
-    let interval = Duration::from_secs(state.cfg.batch_interval_secs);
+pub async fn run(state: Arc<AppState>, chain_id: u64) {
+    let Some(ctx) = state.chain(chain_id) else { return };
+    let interval = Duration::from_secs(ctx.cfg.batch_interval_secs);
     loop {
         // wake up on the interval, or early when the queue reaches batch_max
-        let _ = tokio::time::timeout(interval, state.nudge.notified()).await;
-        let pending = state.db.count_pending().unwrap_or(0) as usize;
+        let _ = tokio::time::timeout(interval, ctx.nudge.notified()).await;
+        let pending = state.db.count_pending(chain_id).unwrap_or(0) as usize;
         if pending == 0 {
             continue;
         }
-        if pending < state.cfg.batch_max {
+        if pending < ctx.cfg.batch_max {
             // not full: wait for the interval to elapse (the notify may have woken us early)
             tokio::time::sleep(interval).await;
         }
-        if let Err(e) = settle(&state).await {
-            tracing::error!("batch failed: {e:#}");
+        if let Err(e) = settle(&state, &ctx).await {
+            tracing::error!(chain_id, "batch failed: {e:#}");
         }
     }
 }
 
-async fn settle(state: &Arc<AppState>) -> anyhow::Result<()> {
-    let rows = state.db.pending(state.cfg.batch_max)?;
+async fn settle(state: &Arc<AppState>, ctx: &Arc<ChainCtx>) -> anyhow::Result<()> {
+    let chain_id = ctx.cfg.chain_id;
+    let rows = state.db.pending(chain_id, ctx.cfg.batch_max)?;
     if rows.is_empty() {
         return Ok(());
     }
@@ -43,8 +45,8 @@ async fn settle(state: &Arc<AppState>) -> anyhow::Result<()> {
         let checked = match kind.as_str() {
             "transfer" => {
                 let t: TransferSubmit = serde_json::from_str(&payload)?;
-                match state.verifier.check_transfer(&t, state.cfg.fee_asset, state.cfg.transfer_fee) {
-                    Ok(c) => match state.precheck(&c, &t.freezers).await {
+                match ctx.verifier.check_transfer(&t, ctx.cfg.fee_asset, ctx.cfg.transfer_fee) {
+                    Ok(c) => match ctx.precheck(&c, &t.freezers).await {
                         Ok(()) => {
                             transfers.push(Chain::transfer_arg(&t)?);
                             c
@@ -62,8 +64,8 @@ async fn settle(state: &Arc<AppState>) -> anyhow::Result<()> {
             }
             "withdraw" => {
                 let w: WithdrawSubmit = serde_json::from_str(&payload)?;
-                match state.verifier.check_withdraw(&w, state.cfg.withdraw_fee) {
-                    Ok(c) => match state.precheck(&c, std::slice::from_ref(&w.freezer)).await {
+                match ctx.verifier.check_withdraw(&w, ctx.cfg.withdraw_fee) {
+                    Ok(c) => match ctx.precheck(&c, std::slice::from_ref(&w.freezer)).await {
                         Ok(()) => {
                             withdraws.push(Chain::withdraw_arg(&w)?);
                             c
@@ -91,37 +93,37 @@ async fn settle(state: &Arc<AppState>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let batch_id = state.db.new_batch(transfers.len(), withdraws.len(), &ids)?;
-    tracing::info!(batch_id, transfers = transfers.len(), withdraws = withdraws.len(), "submitting batch");
+    let batch_id = state.db.new_batch(chain_id, transfers.len(), withdraws.len(), &ids)?;
+    tracing::info!(chain_id, batch_id, transfers = transfers.len(), withdraws = withdraws.len(), "submitting batch");
 
-    match state.chain.submit_batch(transfers, withdraws).await {
+    match ctx.chain.submit_batch(transfers, withdraws).await {
         Ok((hash, true, gas)) => {
             let h = format!("{hash:?}");
             state.db.finish_batch(batch_id, true, Some(&h), None)?;
-            tracing::info!(batch_id, tx = %h, gas, "batch confirmed");
-            fold_and_store(state, batch_id, folds)?;
+            tracing::info!(chain_id, batch_id, tx = %h, gas, "batch confirmed");
+            fold_and_store(state, ctx, batch_id, folds)?;
         }
         Ok((hash, false, gas)) => {
             let h = format!("{hash:?}");
             state.db.finish_batch(batch_id, false, Some(&h), Some("submitBatch reverted"))?;
-            tracing::warn!(batch_id, tx = %h, gas, "batch reverted");
+            tracing::warn!(chain_id, batch_id, tx = %h, gas, "batch reverted");
         }
         Err(e) => {
             state.db.finish_batch(batch_id, false, None, Some(&format!("{e:#}")))?;
-            tracing::warn!(batch_id, "batch send failed: {e:#}");
+            tracing::warn!(chain_id, batch_id, "batch send failed: {e:#}");
         }
     }
     Ok(())
 }
 
 /// Fold the batch's proofs per circuit group with snarkfold and persist the aggregated proofs.
-fn fold_and_store(state: &Arc<AppState>, batch_id: i64, folds: Vec<(Group, Checked)>) -> anyhow::Result<()> {
+fn fold_and_store(state: &Arc<AppState>, ctx: &Arc<ChainCtx>, batch_id: i64, folds: Vec<(Group, Checked)>) -> anyhow::Result<()> {
     let mut by_group: HashMap<Group, Vec<Checked>> = HashMap::new();
     for (g, c) in folds {
         by_group.entry(g).or_default().push(c);
     }
     for (g, txs) in by_group {
-        let gvk = GrothVerifyingKey::from_ark_vk(state.verifier.vk(g));
+        let gvk = GrothVerifyingKey::from_ark_vk(ctx.verifier.vk(g));
         let mut agg = Aggregator::new(&gvk);
         for c in &txs {
             agg.push(&Instance { public_inputs: c.publics.clone() }, &SfProof::from(c.proof.clone()))
@@ -132,7 +134,7 @@ fn fold_and_store(state: &Arc<AppState>, batch_id: i64, folds: Vec<(Group, Check
         let mut bytes = vec![];
         proof.serialize_compressed(&mut bytes)?;
         state.db.put_agg_proof(batch_id, g.key_name(), txs.len(), &bytes)?;
-        tracing::info!(batch_id, group = g.key_name(), proofs = txs.len(), bytes = bytes.len(), "aggregated proof stored");
+        tracing::info!(chain_id = ctx.cfg.chain_id, batch_id, group = g.key_name(), proofs = txs.len(), bytes = bytes.len(), "aggregated proof stored");
     }
     Ok(())
 }

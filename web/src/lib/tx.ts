@@ -4,7 +4,7 @@ import { loadWasm } from './wasm'
 import { prove } from './prover'
 import type { ZkKey } from './keys'
 import type { NoteSource, Utxo } from './sync'
-import { appAbi, tokenAbi, ASSET_ID, type Deployment } from './config'
+import { appAbi, tokenAbi, ASSET_ID, type Deployment, type TokenMeta } from './config'
 import { submitTransfer, submitWithdraw, waitForTx, type AggregatorInfo } from './aggregator'
 import {
   addressToBytes,
@@ -42,6 +42,7 @@ interface Ctx {
   deployment: Deployment
   key: ZkKey
   account: Hex
+  token: TokenMeta
 }
 
 async function send(ctx: Ctx, request: Parameters<WalletClient['writeContract']>[0], onProgress: Progress) {

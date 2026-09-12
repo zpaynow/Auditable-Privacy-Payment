@@ -8,7 +8,6 @@ import type { NoteSource, SyncState } from '../lib/sync'
 import type { LogLine } from './Activity'
 import { useOp } from './useOp'
 
-const DECIMALS = 6
 type Ctx = Parameters<typeof transfer>[0]
 
 export function TransferForm({
@@ -24,6 +23,8 @@ export function TransferForm({
   onLog: (t: string, l?: LogLine['level']) => void
   onDone: (h: Hex) => void
 }) {
+  const DECIMALS = ctx.token.decimals
+  const SYMBOL = ctx.token.symbol
   const [to, setTo] = useState('')
   const [amount, setAmount] = useState('')
   const [viaAgg, setViaAgg] = useState(false)
@@ -79,7 +80,7 @@ export function TransferForm({
       </label>
       <div className="row">
         <label>
-          <span>Amount (tUSD)</span>
+          <span>Amount ({SYMBOL})</span>
           <input id="transfer-amount" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
         </label>
         <button className="primary" type="submit" disabled={busy || !sync}>
@@ -90,7 +91,7 @@ export function TransferForm({
         <input id="transfer-via-agg" type="checkbox" style={{ width: 'auto' }} checked={useAgg} disabled={!agg.info} onChange={(e) => setViaAgg(e.target.checked)} />
         <span>
           Send through the aggregator: no wallet transaction, fee{' '}
-          {agg.info ? `${formatAmount(aggFee, DECIMALS)} tUSD paid from your notes` : 'unavailable'}
+          {agg.info ? `${formatAmount(aggFee, DECIMALS)} ${SYMBOL} paid from your notes` : 'unavailable'}
           {agg.error && <span style={{ color: 'var(--ink-3)' }}> ({agg.error})</span>}
         </span>
       </label>

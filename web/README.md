@@ -29,7 +29,7 @@ auditor admin); `?devkey=0x…` uses an explicit private key. Open two tabs with
 http://localhost:5173/?dev=0
 ```
 
-Tabs: **Deposit** (mint faucet tokens, shield), **Transfer** (send to a payment address),
+Tabs: **Deposit** (get test tokens, shield), **Transfer** (send to a payment address),
 **Withdraw** (unshield one note), **Auditor** (paste the auditor secret, open every note, freeze).
 
 ## Auditor service (no chain scanning)
@@ -86,6 +86,14 @@ The dev wallet (`?dev=` / `?devkey=`) targets a local anvil and is irrelevant in
 users connect MetaMask on Base Sepolia.
 
 ## Testnet
+
+The default network is **BOTChain Testnet** (chain id 968, RPC `https://rpc.bohr.life`, native
+token BOT, explorer `https://scan.bohr.life`); Base Sepolia is offered as well, and the local
+anvil chain only in dev builds. A chain appears in the selector only when
+`src/deployments/<chainId>.json` exists. Token symbol and decimals are read from the registered
+ERC20. On BOTChain the deposit tab links to the external faucet
+(`https://faucet.botchain.ai/en/basic`, see `faucets` in `src/lib/config.ts`); on chains without
+an entry it mints the deployed `TestToken` directly.
 
 Deploy with a funded key (`--private-key`) and the testnet RPC (see `solidity/README.md`), then
 rerun `scripts/sync.sh`; the app picks up `src/deployments/<chainId>.json` automatically and

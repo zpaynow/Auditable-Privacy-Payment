@@ -1,24 +1,26 @@
 import { useState } from 'react'
 import type { SyncState } from '../lib/sync'
 import { formatAmount, short } from '../lib/encoding'
-
-const DECIMALS = 6
-const SYMBOL = 'tUSD'
+import type { TokenMeta } from '../lib/config'
 
 export function Notes({
   keyAddress,
+  token,
   sync,
   syncing,
   syncError,
   onRefresh,
 }: {
   keyAddress: string
+  token: TokenMeta
   sync: SyncState | null
   syncing: boolean
   syncError: string | null
   onRefresh: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const DECIMALS = token.decimals
+  const SYMBOL = token.symbol
   const live = sync?.utxos.filter((u) => !u.spent) ?? []
   const spendable = live.filter((u) => !u.frozen).reduce((s, u) => s + u.amount, 0n)
   const frozen = live.filter((u) => u.frozen).reduce((s, u) => s + u.amount, 0n)

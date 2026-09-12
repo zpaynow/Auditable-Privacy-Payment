@@ -13,14 +13,29 @@ export const anvil = defineChain({
   testnet: true,
 })
 
-export const chains = [anvil, baseSepolia] as const
+/** BOTChain testnet — the default network. */
+export const botchainTestnet = defineChain({
+  id: 968,
+  name: 'BOTChain Testnet',
+  nativeCurrency: { name: 'BOT', symbol: 'BOT', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.bohr.life'] } },
+  blockExplorers: { default: { name: 'BOTChain Explorer', url: 'https://scan.bohr.life' } },
+  testnet: true,
+})
+
+// first entry is the default; the local anvil chain is only offered in dev builds
+export const chains = (import.meta.env.DEV ? [botchainTestnet, baseSepolia, anvil] : [botchainTestnet, baseSepolia]) as unknown as readonly [
+  typeof botchainTestnet,
+  ...(typeof baseSepolia | typeof anvil)[],
+]
 
 export const wagmiConfig = createConfig({
   chains,
   connectors: [injected()],
   transports: {
-    [anvil.id]: http('http://127.0.0.1:8545'),
+    [botchainTestnet.id]: http('https://rpc.bohr.life'),
     [baseSepolia.id]: http(),
+    [anvil.id]: http('http://127.0.0.1:8545'),
   },
 })
 
@@ -41,6 +56,17 @@ for (const d of Object.values(deploymentFiles)) deployments[Number(d.chainId)] =
 
 export const appAbi = appAbiJson as unknown as readonly unknown[]
 export const tokenAbi = tokenAbiJson as unknown as readonly unknown[]
+
+/** External faucets per chain. When present, the deposit tab links there instead of minting TestToken. */
+export const faucets: Record<number, string> = {
+  [botchainTestnet.id]: 'https://faucet.botchain.ai/en/basic',
+}
+
+/** Token metadata read from the registered ERC20 (symbol / decimals). */
+export interface TokenMeta {
+  symbol: string
+  decimals: number
+}
 
 /** The only asset registered in Phase 1. */
 export const ASSET_ID = 1n

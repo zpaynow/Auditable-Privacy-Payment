@@ -8,7 +8,6 @@ import type { NoteSource, SyncState } from '../lib/sync'
 import type { LogLine } from './Activity'
 import { useOp } from './useOp'
 
-const DECIMALS = 6
 type Ctx = Parameters<typeof withdraw>[0]
 
 export function WithdrawForm({
@@ -24,6 +23,8 @@ export function WithdrawForm({
   onLog: (t: string, l?: LogLine['level']) => void
   onDone: (h: Hex) => void
 }) {
+  const DECIMALS = ctx.token.decimals
+  const SYMBOL = ctx.token.symbol
   const [recipient, setRecipient] = useState<string>(ctx.account)
   const [selected, setSelected] = useState<number | null>(null)
   const [viaAgg, setViaAgg] = useState(false)
@@ -91,7 +92,7 @@ export function WithdrawForm({
         <input id="withdraw-via-agg" type="checkbox" style={{ width: 'auto' }} checked={useAgg} disabled={!agg.info} onChange={(e) => setViaAgg(e.target.checked)} />
         <span>
           Withdraw through the aggregator: no wallet transaction, fee{' '}
-          {agg.info ? `${formatAmount(aggFee, DECIMALS)} tUSD deducted from the note` : 'unavailable'}
+          {agg.info ? `${formatAmount(aggFee, DECIMALS)} ${SYMBOL} deducted from the note` : 'unavailable'}
           {agg.error && <span style={{ color: 'var(--ink-3)' }}> ({agg.error})</span>}
         </span>
       </label>
@@ -101,7 +102,7 @@ export function WithdrawForm({
           <input id="withdraw-recipient" className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} spellCheck={false} />
         </label>
         <button className="primary" type="submit" disabled={busy || !note}>
-          {busy ? 'Working…' : note ? `Withdraw ${formatAmount(useAgg ? note.amount - aggFee : note.amount, DECIMALS)} tUSD` : 'Withdraw'}
+          {busy ? 'Working…' : note ? `Withdraw ${formatAmount(useAgg ? note.amount - aggFee : note.amount, DECIMALS)} ${SYMBOL}` : 'Withdraw'}
         </button>
       </div>
       {step && (

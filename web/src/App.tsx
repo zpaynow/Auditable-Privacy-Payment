@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useChainId, useConnect, useDisconnect, usePublicClient, useSignMessage, useSwitchChain, useWalletClient } from 'wagmi'
 import type { Hex } from './lib/encoding'
-import { deployments, ZK_KEY_MESSAGE, chains } from './lib/config'
+import { deployments, ZK_KEY_MESSAGE, chains, tokenAbi, type TokenMeta } from './lib/config'
 import { forgetKey, keyFromSeed, recallKey, rememberKey, type ZkKey } from './lib/keys'
 import { RemoteWallet, ShieldedWallet, type NoteSource, type SyncState } from './lib/sync'
 import { getStatus } from './lib/auditorClient'
@@ -17,7 +17,7 @@ import { Activity, type LogLine } from './components/Activity'
 type Tab = 'deposit' | 'transfer' | 'withdraw' | 'auditor'
 
 export default function App() {
-  const { address, isConnected } = useAccount()
+  const { address, isConnected, chainId: walletChainId } = useAccount()
   const chainId = useChainId()
   const { connect, connectors, isPending: connecting } = useConnect()
   const { disconnect } = useDisconnect()
@@ -27,6 +27,9 @@ export default function App() {
   const { signMessageAsync } = useSignMessage()
 
   const deployment = deployments[chainId]
+  // the wallet is on a network we do not support (or has not switched yet): wagmi falls back to the
+  // default chain for chainId, but no wallet client is available until the user switches
+  const wrongChain = isConnected && walletChainId !== chainId
   const [key, setKey] = useState<ZkKey | null>(null)
   const [deriving, setDeriving] = useState(false)
   const walletRef = useRef<NoteSource | null>(null)
@@ -35,6 +38,23 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('deposit')
   const [log, setLog] = useState<LogLine[]>([])
+  const [token, setToken] = useState<TokenMeta | null>(null)
+
+  // symbol / decimals of the registered token on the current chain
+  useEffect(() => {
+    setToken(null)
+    if (!publicClient || !deployment) return
+    let alive = true
+    Promise.all([
+      publicClient.readContract({ address: deployment.token, abi: tokenAbi, functionName: 'symbol' }),
+      publicClient.readContract({ address: deployment.token, abi: tokenAbi, functionName: 'decimals' }),
+    ])
+      .then(([symbol, decimals]) => alive && setToken({ symbol: String(symbol), decimals: Number(decimals) }))
+      .catch(() => alive && setToken({ symbol: 'TOKEN', decimals: 18 }))
+    return () => {
+      alive = false
+    }
+  }, [publicClient, deployment])
 
   const pushLog = useCallback((text: string, level: LogLine['level'] = 'info') => {
     setLog((l) => [{ t: Date.now(), text, level }, ...l].slice(0, 200))
@@ -113,12 +133,13 @@ export default function App() {
   }
 
   const ctx = useMemo(() => {
-    if (!publicClient || !walletClient || !deployment || !key || !address) return null
-    return { publicClient, walletClient, deployment, key, account: address as Hex }
-  }, [publicClient, walletClient, deployment, key, address])
+    if (!publicClient || !walletClient || !deployment || !key || !address || !token) return null
+    return { publicClient, walletClient, deployment, key, account: address as Hex, token }
+  }, [publicClient, walletClient, deployment, key, address, token])
 
   const afterTx = (hash: Hex, what: string) => {
-    pushLog(`${what} confirmed · ${short(hash, 8)}`, 'ok')
+    const explorer = publicClient?.chain?.blockExplorers?.default?.url
+    pushLog(`${what} confirmed · ${explorer ? `${explorer}/tx/${hash}` : short(hash, 8)}`, 'ok')
     void doSync()
   }
 
@@ -127,7 +148,7 @@ export default function App() {
       <header className="top">
         <div className="brand">
           <h1>Auditable Privacy Payment</h1>
-          <small>testnet · phase 1</small>
+          <small>testnet</small>
         </div>
         <div className="wallet">
           {isConnected ? (
@@ -153,14 +174,32 @@ export default function App() {
               <button onClick={() => { disconnect(); forgetKey(); setKey(null) }}>Disconnect</button>
             </>
           ) : (
-            connectors.map((c) => (
-              <button key={c.uid} className="primary" disabled={connecting} onClick={() => connect({ connector: c })}>
-                Connect {c.name}
-              </button>
-            ))
+            connectors
+              // EIP-6963 discovery also announces non-EVM wallets (TronLink…); keep EVM wallets only
+              .filter((c) => !/tron/i.test(c.name))
+              .map((c) => (
+                <button key={c.uid} className="primary" disabled={connecting} onClick={() => connect({ connector: c })}>
+                  Connect {c.name}
+                </button>
+              ))
           )}
         </div>
       </header>
+
+      {wrongChain && (
+        <section className="card" style={{ marginBottom: 20, borderColor: 'var(--warn)' }}>
+          <h2>Wallet is on an unsupported network</h2>
+          <p className="hint">
+            Your wallet reports chain {walletChainId ?? 'unknown'}. Switch it to {chains.find((c) => c.id === chainId)?.name ?? chainId} to
+            continue; the network will be added to the wallet if it is missing.
+          </p>
+          <div>
+            <button className="primary" onClick={() => switchChain({ chainId: chainId as (typeof chains)[number]['id'] })}>
+              Switch wallet to {chains.find((c) => c.id === chainId)?.name ?? chainId}
+            </button>
+          </div>
+        </section>
+      )}
 
       {!isConnected && (
         <section className="card">
@@ -192,6 +231,7 @@ export default function App() {
           <div style={{ display: 'grid', gap: 20 }}>
             <Notes
               keyAddress={key.address}
+              token={token ?? { symbol: '…', decimals: 18 }}
               sync={sync}
               syncing={syncing}
               syncError={syncError}
@@ -208,6 +248,17 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {(!ctx || !walletRef.current) && (
+              <p className="empty">
+                {wrongChain
+                  ? 'Switch your wallet to the selected network to use this tab.'
+                  : !walletClient
+                    ? 'Waiting for the wallet client… (approve the connection in your wallet if it is asking)'
+                    : !token
+                      ? 'Reading token details…'
+                      : 'Connecting to the note source…'}
+              </p>
+            )}
             {ctx && walletRef.current && (
               <>
                 {tab === 'deposit' && <DepositForm ctx={ctx} onLog={pushLog} onDone={(h) => afterTx(h, 'Deposit')} />}

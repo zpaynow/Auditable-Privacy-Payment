@@ -7,10 +7,10 @@ import { appAbi } from '../lib/config'
 import type { LogLine } from './Activity'
 import { useOp } from './useOp'
 
-const DECIMALS = 6
 type Ctx = Parameters<typeof setFrozen>[0]
 
 export function AuditorPanel({ ctx, onLog }: { ctx: Ctx; onLog: (t: string, l?: LogLine['level']) => void }) {
+  const DECIMALS = ctx.token.decimals
   const [secret, setSecret] = useState('')
   const [rows, setRows] = useState<(AuditRow & { frozen: boolean })[] | null>(null)
   const [scope, setScope] = useState<'session' | 'last' | 'all'>('session')

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount, useChainId, useConnect, useDisconnect, usePublicClient, useSignMessage, useSwitchChain, useWalletClient } from 'wagmi'
 import type { Hex } from './lib/encoding'
-import { deployments, ZK_KEY_MESSAGE, chains, chainGroupLabel, tokenAbi, type TokenMeta } from './lib/config'
+import { deployments, ZK_KEY_MESSAGE, chains, chainGroupLabel, isTestnet, tokenAbi, type TokenMeta } from './lib/config'
 import { forgetKey, keyFromSeed, recallKey, rememberKey, type ZkKey } from './lib/keys'
 import { RemoteWallet, ShieldedWallet, type NoteSource, type SyncState } from './lib/sync'
 import { getStatus } from './lib/auditorClient'
@@ -27,6 +27,12 @@ export default function App() {
   const { signMessageAsync } = useSignMessage()
 
   const deployment = deployments[chainId]
+  const chain = chains.find((c) => c.id === chainId)
+  // testnets get a banner, a badge and a tagged tab title so nobody mistakes them for production
+  const testnet = isTestnet(chainId)
+  useEffect(() => {
+    document.title = testnet ? `[TESTNET] Auditable Privacy Payment` : 'Auditable Privacy Payment'
+  }, [testnet])
   // the wallet is on a network we do not support (or has not switched yet): wagmi falls back to the
   // default chain for chainId, but no wallet client is available until the user switches
   const wrongChain = isConnected && walletChainId !== chainId
@@ -145,16 +151,24 @@ export default function App() {
 
   return (
     <>
+      {testnet && (
+        <div className="env-banner" role="status">
+          <strong>Test environment</strong>
+          You are on {chain?.name ?? `chain ${chainId}`}. Tokens here have no real value.
+        </div>
+      )}
       <header className="top">
         <div className="brand">
           <h1>Auditable Privacy Payment</h1>
-          <small>{chainGroupLabel === 'default' ? 'testnet' : chainGroupLabel}</small>
+          {chainGroupLabel !== 'default' && <small>{chainGroupLabel}</small>}
+          {testnet && <span className="pill warn env-badge">Testnet</span>}
         </div>
         <div className="wallet">
           {isConnected ? (
             <>
               <select
                 id="chain"
+                className={testnet ? 'testnet' : undefined}
                 value={chainId}
                 onChange={(e) => switchChain({ chainId: Number(e.target.value) as (typeof chains)[number]['id'] })}
                 style={{ width: 'auto' }}
@@ -162,6 +176,7 @@ export default function App() {
                 {chains.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
+                    {c.testnet ? ' (testnet)' : ''}
                   </option>
                 ))}
               </select>

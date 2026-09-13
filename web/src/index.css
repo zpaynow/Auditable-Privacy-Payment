@@ -38,6 +38,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+body { overflow-x: clip; } /* the full-bleed test banner uses 100vw */
 body {
   background: var(--bg);
   color: var(--ink);
@@ -73,6 +74,16 @@ header.top {
 }
 header.top .brand { display: flex; align-items: baseline; gap: 10px; }
 header.top .brand small { color: var(--ink-3); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+header.top .brand .env-badge { align-self: center; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; }
+
+/* test-environment marker: full-bleed stripe above the header (like a payment provider's "test mode") */
+.env-banner {
+  margin-inline: calc(50% - 50vw); padding: 6px clamp(16px, 3vw, 32px);
+  background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--warn);
+  font-size: 12.5px; text-align: center;
+}
+.env-banner strong { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; margin-right: 8px; }
+select.testnet { border-color: var(--warn); color: var(--warn); font-weight: 600; }
 .wallet { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
 .pill.ok { background: var(--ok-soft); color: var(--ok); }

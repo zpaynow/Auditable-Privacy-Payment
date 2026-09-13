@@ -1,4 +1,4 @@
-import { createConfig, http } from 'wagmi'
+import { createConfig, createStorage, http, noopStorage } from 'wagmi'
 import { baseSepolia, sepolia } from 'wagmi/chains'
 import { defineChain } from 'viem'
 import { injected } from 'wagmi/connectors'
@@ -39,7 +39,8 @@ export type KnownChain = (typeof registry)[number]
 /**
  * Hostname → chains. The first label of the hostname (e.g. `botchain` in
  * `botchain.zpaynow.com`) selects a group; `?chains=968,677` overrides for testing; anything
- * else gets the default group. Within a group the first chain with a deployment is the default.
+ * else gets the default group. Within a group mainnets are offered before testnets, and the first
+ * chain with a deployment is the default.
  */
 export const chainGroups: Record<string, number[]> = {
   botchain: [botchain.id, botchainTestnet.id],
@@ -73,7 +74,9 @@ export const deployments: Record<number, Deployment> = {}
 for (const d of Object.values(deploymentFiles)) deployments[Number(d.chainId)] = d
 
 /** The chains offered on this host: the host's group, restricted to chains that have a deployment
- *  (anvil only in dev builds). Falls back to every deployed chain, then to the whole registry. */
+ *  (anvil only in dev builds). Falls back to every deployed chain, then to the whole registry.
+ *  Mainnets are moved ahead of testnets (stable sort) so the first entry, wagmi's default chain,
+ *  is a mainnet whenever the group has one. */
 export const selectedChainIds = selectChainIds()
 function pickChains(): KnownChain[] {
   const deployed = (id: number) => id in deployments && (import.meta.env.DEV || id !== anvil.id)
@@ -81,17 +84,52 @@ function pickChains(): KnownChain[] {
   let list = selectedChainIds.map(byId).filter((c): c is KnownChain => !!c && deployed(c.id))
   if (list.length === 0) list = registry.filter((c) => deployed(c.id))
   if (list.length === 0) list = [...registry]
-  return list
+  return list.sort((a, b) => Number(!!a.testnet) - Number(!!b.testnet))
 }
 export const chains = pickChains() as unknown as readonly [KnownChain, ...KnownChain[]]
+/** The chain the app starts on (a mainnet whenever the host's group has one). */
+export const defaultChain: KnownChain = chains[0]
+export const isTestnet = (chainId: number) => !!chains.find((c) => c.id === chainId)?.testnet
 
 /** Human label for the selected group (shown in the header). */
 export const chainGroupLabel: string =
   Object.entries(chainGroups).find(([, ids]) => ids.join() === selectedChainIds.join())?.[0] ?? 'custom'
 
+/** wagmi persists the last selected chain in localStorage and would restore it on the next visit.
+ *  We keep the persisted connection (so the wallet reconnects) but reset the remembered chain to the
+ *  default: every page load starts on the preferred (mainnet) chain, and a testnet is only shown when
+ *  the connected wallet is actually on it or the user picks it in the selector. */
+function preferDefaultChainStorage() {
+  if (typeof localStorage === 'undefined') return noopStorage
+  return {
+    getItem(key: string) {
+      const raw = localStorage.getItem(key)
+      if (!raw || key !== 'wagmi.store') return raw
+      try {
+        const persisted = JSON.parse(raw) as { state?: { chainId?: number } }
+        if (persisted.state && typeof persisted.state === 'object') persisted.state.chainId = defaultChain.id
+        return JSON.stringify(persisted)
+      } catch {
+        return raw
+      }
+    },
+    setItem(key: string, value: string) {
+      try {
+        localStorage.setItem(key, value)
+      } catch {
+        /* quota / private mode: the app works without persistence */
+      }
+    },
+    removeItem(key: string) {
+      localStorage.removeItem(key)
+    },
+  }
+}
+
 export const wagmiConfig = createConfig({
   chains,
   connectors: [injected()],
+  storage: createStorage({ storage: preferDefaultChainStorage() }),
   transports: Object.fromEntries(registry.map((c) => [c.id, http(c.rpcUrls.default.http[0])])) as Record<number, ReturnType<typeof http>>,
 })
 

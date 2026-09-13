@@ -96,8 +96,12 @@ Base Sepolia, Sepolia, local anvil) and hostname groups:
 | `botchain.*` (e.g. `botchain.zpaynow.com`) | BOTChain, BOTChain Testnet |
 | anything else | Base Sepolia, Sepolia, anvil (dev builds only) |
 
-Only chains that have `src/deployments/<chainId>.json` are actually offered; the first offered
-chain is the default. `?chains=968,677` overrides the group for testing. To add a chain: define
+Only chains that have `src/deployments/<chainId>.json` are actually offered; mainnets are listed
+before testnets and the first offered chain is the default, so `botchain.*` starts on BOTChain
+mainnet. The last selected chain is deliberately not restored across page loads (only the wallet
+connection is), so a testnet is shown only when the wallet is on it or the user picks it. Testnets
+are marked with a banner above the header, a "Testnet" badge and a `[TESTNET]` tab title.
+`?chains=968,677` overrides the group for testing. To add a chain: define
 it in the registry, add it to a group (or a new group keyed by a subdomain label), deploy, run
 `scripts/sync.sh`. Token symbol and decimals are read from the registered ERC20; per-chain
 faucet links live in `faucets` (BOTChain Testnet → `https://faucet.botchain.ai/en/basic`). Chains

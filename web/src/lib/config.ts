@@ -98,7 +98,8 @@ export const wagmiConfig = createConfig({
 export const appAbi = appAbiJson as unknown as readonly unknown[]
 export const tokenAbi = tokenAbiJson as unknown as readonly unknown[]
 
-/** External faucets per chain. When present, the deposit tab links there instead of minting TestToken. */
+/** External faucets per chain. When present, the deposit tab links there instead of minting TestToken.
+ *  Chains without an entry show the mint button on testnets and a block-explorer token link on mainnets. */
 export const faucets: Record<number, string> = {
   [botchainTestnet.id]: 'https://faucet.botchain.ai/en/basic',
 }

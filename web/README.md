@@ -100,7 +100,9 @@ Only chains that have `src/deployments/<chainId>.json` are actually offered; the
 chain is the default. `?chains=968,677` overrides the group for testing. To add a chain: define
 it in the registry, add it to a group (or a new group keyed by a subdomain label), deploy, run
 `scripts/sync.sh`. Token symbol and decimals are read from the registered ERC20; per-chain
-faucet links live in `faucets` (BOTChain Testnet → `https://faucet.botchain.ai/en/basic`).
+faucet links live in `faucets` (BOTChain Testnet → `https://faucet.botchain.ai/en/basic`). Chains
+without a faucet entry get a "Mint 1000" button on testnets (`testnet: true` in the chain
+definition) and a link to the token on the chain's block explorer on mainnets.
 
 Deploy with a funded key (`--private-key`) and the testnet RPC (see `solidity/README.md`), then
 rerun `scripts/sync.sh`; the app picks up `src/deployments/<chainId>.json` automatically and

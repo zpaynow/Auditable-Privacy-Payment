@@ -12,7 +12,12 @@ type Ctx = Parameters<typeof deposit>[0]
 export function DepositForm({ ctx, onLog, onDone }: { ctx: Ctx; onLog: (t: string, l?: LogLine['level']) => void; onDone: (h: Hex) => void }) {
   const DECIMALS = ctx.token.decimals
   const SYMBOL = ctx.token.symbol
-  const faucet = faucets[ctx.publicClient.chain?.id ?? 0]
+  const chain = ctx.publicClient.chain
+  const faucet = faucets[chain?.id ?? 0]
+  // Mainnet without a faucet: point at the token on the block explorer instead of minting.
+  const explorer = chain?.blockExplorers?.default?.url
+  const tokenLink = !faucet && !chain?.testnet && explorer ? `${explorer.replace(/\/$/, '')}/token/${ctx.deployment.token}` : undefined
+  const topUpHint = tokenLink ? `top up your ${SYMBOL} balance first` : 'get some from the faucet first'
   const [amount, setAmount] = useState('100')
   const [balance, setBalance] = useState<bigint | null>(null)
   const { busy, step, run } = useOp(onLog)
@@ -45,7 +50,7 @@ export function DepositForm({ ctx, onLog, onDone }: { ctx: Ctx; onLog: (t: strin
     try {
       amt = parseAmount(amount, DECIMALS)
       if (amt <= 0n) throw new Error('amount must be positive')
-      if (balance !== null && amt > balance) throw new Error(`not enough public ${SYMBOL}: get some from the faucet first`)
+      if (balance !== null && amt > balance) throw new Error(`not enough public ${SYMBOL}: ${topUpHint}`)
     } catch (err) {
       onLog(err instanceof Error ? err.message : String(err), 'err')
       return
@@ -79,6 +84,10 @@ export function DepositForm({ ctx, onLog, onDone }: { ctx: Ctx; onLog: (t: strin
             <a href={faucet} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>
               Get test tokens from the faucet ↗
             </a>
+          ) : tokenLink ? (
+            <a href={tokenLink} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>
+              View {SYMBOL} on explorer ↗
+            </a>
           ) : (
             <button type="button" onClick={mint} disabled={busy} style={{ padding: '2px 8px', marginLeft: 8 }}>
               Mint 1000 (faucet)
@@ -95,7 +104,7 @@ export function DepositForm({ ctx, onLog, onDone }: { ctx: Ctx; onLog: (t: strin
           {busy ? 'Working…' : 'Deposit'}
         </button>
       </div>
-      {insufficient && <p className="hint" style={{ color: 'var(--warn)' }}>Not enough public {SYMBOL} for this amount. Get some from the faucet first.</p>}
+      {insufficient && <p className="hint" style={{ color: 'var(--warn)' }}>Not enough public {SYMBOL} for this amount. {topUpHint[0].toUpperCase() + topUpHint.slice(1)}.</p>}
       {step && (
         <div className="progress">
           <span className="dot" /> {step}

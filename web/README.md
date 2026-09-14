@@ -76,6 +76,7 @@ Settings that matter:
 | --- | --- |
 | `VITE_AGGREGATOR_URL`, `VITE_AUDITOR_URL` | public **https** URLs of the two services (a Pages site is https; http calls are blocked as mixed content). Put them behind Cloudflare Tunnel, Caddy or nginx with TLS. Both services already send permissive CORS. |
 | `VITE_KEYS_URL` | leave `/keys` to ship the ~50 MB of proving keys with the site (every file is under Pages' 25 MiB limit; `public/_headers` marks them immutable). Or upload `artifacts/*.pk` to an R2 bucket with a public domain and CORS for the site origin, and set the bucket URL here. |
+| proving-key version | not configured: `sync.sh` hashes the key bytes into `public/keys/manifest.json` and `src/keysVersion.ts`. Every key request carries it as `?v=`, and the worker refuses to prove if the two disagree, so a bucket that was not re-uploaded fails loudly instead of producing proofs the verifiers reject. Deploy the site and the keys together. |
 | `src/deployments/84532.json` | present after `sync.sh`; the app only offers chains that have a deployment file |
 | Node | 22+ (Vite 8) if you ever build on Pages' side |
 

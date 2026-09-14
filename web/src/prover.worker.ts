@@ -2,6 +2,7 @@
 // Proving worker: loads the wasm module once, fetches proving keys on demand
 // (browser HTTP cache keeps them across reloads), and answers prove requests.
 import init, * as w from './wasm/wasm.js'
+import { EXPECTED_KEYS_VERSION } from './keysVersion'
 
 export type ProveRequest =
   | {
@@ -47,16 +48,58 @@ const hi = (n: bigint) => n >> 64n
 
 const wasmReady = init()
 const keyCache = new Map<string, Promise<Uint8Array>>()
-// where the proving keys live: same origin (/keys) by default, or a CDN / R2 bucket via VITE_KEYS_URL
+// Where the proving keys live: same origin (/keys) by default, or a CDN / R2 bucket via
+// VITE_KEYS_URL. Keys are served with a one-year immutable cache, so every request carries the
+// key version as `?v=`: a new version is a new URL and can never hit a stale cached copy.
 const KEYS_URL: string = ((import.meta.env.VITE_KEYS_URL as string | undefined) ?? '/keys').replace(/\/$/, '')
+
+// The version is derived from the key bytes by scripts/sync.sh, written both into the bucket
+// (manifest.json) and into this build (keysVersion.ts). Comparing them catches the case the
+// circuits changed but one side was not redeployed, which would otherwise show up much later as
+// an unexplained on-chain InvalidProof.
+let keysVersion: Promise<string> | null = null
+
+function resolveKeysVersion(): Promise<string> {
+  if (!keysVersion) {
+    // `?t=` plus no-store so neither the browser nor a CDN edge can hand back an old manifest
+    keysVersion = fetch(`${KEYS_URL}/manifest.json?t=${Date.now()}`, { cache: 'no-store' })
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error(
+            `no proving-key manifest at ${KEYS_URL} (HTTP ${r.status}). Run web/scripts/sync.sh and publish public/keys.`,
+          )
+        }
+        const m = (await r.json()) as { version?: string }
+        if (!m.version) throw new Error('proving-key manifest.json is missing "version"')
+        if (m.version !== EXPECTED_KEYS_VERSION) {
+          throw new Error(
+            `proving keys at ${KEYS_URL} are version ${m.version} but this build expects ${EXPECTED_KEYS_VERSION}. ` +
+              'Re-run web/scripts/sync.sh, then redeploy the site and the keys together.',
+          )
+        }
+        return m.version
+      })
+      .catch((e) => {
+        keysVersion = null // a transient failure must not poison every later proof
+        throw e
+      })
+  }
+  return keysVersion
+}
 
 function loadKey(name: string): Promise<Uint8Array> {
   let p = keyCache.get(name)
   if (!p) {
-    p = fetch(`${KEYS_URL}/${name}.pk`).then(async (r) => {
-      if (!r.ok) throw new Error(`failed to fetch proving key ${name}: ${r.status}`)
-      return new Uint8Array(await r.arrayBuffer())
-    })
+    p = resolveKeysVersion()
+      .then(async (v) => {
+        const r = await fetch(`${KEYS_URL}/${name}.pk?v=${encodeURIComponent(v)}`)
+        if (!r.ok) throw new Error(`failed to fetch proving key ${name}: ${r.status}`)
+        return new Uint8Array(await r.arrayBuffer())
+      })
+      .catch((e) => {
+        keyCache.delete(name)
+        throw e
+      })
     keyCache.set(name, p)
   }
   return p

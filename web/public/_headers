@@ -1,3 +1,7 @@
+# Version stamp: must always be revalidated, it is what detects stale keys.
+/keys/manifest.json
+  Cache-Control: no-store
+# Key bytes are addressed by ?v=<version>, so a new version is a new URL.
 /keys/*
   Cache-Control: public, max-age=31536000, immutable
 /assets/*

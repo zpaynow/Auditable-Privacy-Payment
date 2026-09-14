@@ -28,5 +28,6 @@ src/wasm/
 public/keys/
 src/abi/
 src/deployments/
+src/keysVersion.ts
 .env.production
 .env.local

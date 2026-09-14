@@ -17,3 +17,4 @@ ark-crypto-primitives.workspace = true
 ark-groth16.workspace = true
 rand_chacha.workspace = true
 sha2.workspace = true
+sha3.workspace = true

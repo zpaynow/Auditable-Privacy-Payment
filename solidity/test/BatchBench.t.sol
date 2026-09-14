@@ -10,6 +10,7 @@ import {Transfer1Verifier} from "../src/verifiers/Transfer1Verifier.sol";
 import {Transfer2x3Verifier} from "../src/verifiers/Transfer2x3Verifier.sol";
 import {Transfer1x3Verifier} from "../src/verifiers/Transfer1x3Verifier.sol";
 import {WithdrawVerifier} from "../src/verifiers/WithdrawVerifier.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /// Gas of submitBatch as the batch grows. Fixture: `cargo run -p app-tools -- bench-batch --n 8`
 /// (8 independent 1-in/3-out transfers and 2 withdraws, all against the same root).
@@ -30,7 +31,11 @@ contract BatchBenchTest is Test {
             transfer1x3: address(new Transfer1x3Verifier()),
             withdraw: address(new WithdrawVerifier())
         });
-        app = new APP(v, vm.parseJsonUint(json, ".auditorX"), vm.parseJsonUint(json, ".auditorY"), address(0xA0D1));
+        APP impl = new APP();
+        app = APP(address(new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(APP.initialize, (v, vm.parseJsonUint(json, ".auditorX"), vm.parseJsonUint(json, ".auditorY"), address(0xA0D1), address(this)))
+        )));
         app.setOperator(operator, true);
         usd = new TestToken("Test USD", "tUSD", 6);
         app.registerAsset(1, address(usd));

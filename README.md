@@ -30,6 +30,16 @@ registered auditor can open — proven correct inside the circuit — plus on-ch
 See `ROADMAP.md` for status and design decisions, `solidity/README.md` to deploy,
 `web/README.md` to run the app, `aggregator/README.md` and `auditor/README.md` for the services.
 
+## Production security requirements
+
+The checked-in proving/verifying artifacts are development artifacts. Before a production
+deployment, generate every Groth16 verifier in a documented multi-party trusted setup ceremony,
+publish the transcript and verifier-key hashes, and deploy only those verifiers. Never use
+`app-tools setup --insecure-seed` outside local tests: anyone who learns that setup randomness can
+forge proofs. Deploy `APP` through the supplied ERC-1967 proxy; its `app` deployment address is
+the proxy, while `appImpl` is only the implementation address. Existing non-proxy deployments
+cannot be upgraded in place and must be migrated to a newly deployed proxy pool.
+
 ## Quick start (local)
 
 ```sh

@@ -344,7 +344,8 @@ mod tests {
         let keypair = Keypair::generate(rng);
         let output = OpenCommitment::generate(rng, 1, 42, keypair.public);
         let (pk, vk) = deposit::setup(false, rng).unwrap();
-        let circuit = deposit::DepositCircuit { asset: 1, amount: 42, output: output.clone(), audit: None };
+        let memo = output.memo_encrypt(rng).unwrap();
+        let circuit = deposit::DepositCircuit { asset: 1, amount: 42, output: output.clone(), memo: memo.clone(), audit: None };
         let proof = deposit::prove(&pk, circuit, rng).unwrap();
 
         let bytes = proof_to_evm(&proof);
@@ -352,12 +353,12 @@ mod tests {
         let back = proof_from_evm(&bytes).unwrap();
         assert_eq!(back, proof);
 
-        let d = deposit::Deposit { asset: 1, amount: 42, commitment: output.commit(), memo: vec![], audit: None };
+        let d = deposit::Deposit { asset: 1, amount: 42, commitment: output.commit(), memo, audit: None };
         deposit::verify(&vk, &d, &back).unwrap();
 
         let sol = vk_to_solidity(&vk, "DepositVerifier");
         assert!(sol.contains("contract DepositVerifier"));
-        assert!(sol.contains("uint256 public constant NUM_INPUTS = 3;"));
+        assert!(sol.contains("uint256 public constant NUM_INPUTS = 4;"));
         assert!(sol.contains("IC3x"));
     }
 }

@@ -34,8 +34,8 @@ contract VerifiersTest is Test {
     function test_deposit_fixture_verifies() public view {
         (uint256[8] memory proof, uint256[] memory inputs) = _load("deposit");
         assertEq(inputs.length, deposit.NUM_INPUTS());
-        uint256[8] memory pub;
-        for (uint256 i = 0; i < 8; i++) pub[i] = inputs[i];
+        uint256[9] memory pub;
+        for (uint256 i = 0; i < 9; i++) pub[i] = inputs[i];
         assertTrue(deposit.verifyProof(proof, pub));
         pub[2] ^= 1; // tamper commitment
         assertFalse(deposit.verifyProof(proof, pub));
@@ -44,8 +44,8 @@ contract VerifiersTest is Test {
     function test_transfer_fixture_verifies() public view {
         (uint256[8] memory proof, uint256[] memory inputs) = _load("transfer_2x2");
         assertEq(inputs.length, transferV.NUM_INPUTS());
-        uint256[15] memory pub;
-        for (uint256 i = 0; i < 15; i++) pub[i] = inputs[i];
+        uint256[16] memory pub;
+        for (uint256 i = 0; i < 16; i++) pub[i] = inputs[i];
         assertTrue(transferV.verifyProof(proof, pub));
         pub[0] ^= 1; // tamper nullifier
         assertFalse(transferV.verifyProof(proof, pub));
@@ -54,8 +54,8 @@ contract VerifiersTest is Test {
     function test_transfer1_fixture_verifies() public view {
         (uint256[8] memory proof, uint256[] memory inputs) = _load("transfer_1x2");
         assertEq(inputs.length, transfer1V.NUM_INPUTS());
-        uint256[13] memory pub;
-        for (uint256 i = 0; i < 13; i++) pub[i] = inputs[i];
+        uint256[14] memory pub;
+        for (uint256 i = 0; i < 14; i++) pub[i] = inputs[i];
         assertTrue(transfer1V.verifyProof(proof, pub));
         pub[2] ^= 1;
         assertFalse(transfer1V.verifyProof(proof, pub));
@@ -64,8 +64,8 @@ contract VerifiersTest is Test {
     function test_withdraw_fixture_verifies() public view {
         (uint256[8] memory proof, uint256[] memory inputs) = _load("withdraw");
         assertEq(inputs.length, withdraw.NUM_INPUTS());
-        uint256[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = inputs[i];
+        uint256[8] memory pub;
+        for (uint256 i = 0; i < 8; i++) pub[i] = inputs[i];
         assertTrue(withdraw.verifyProof(proof, pub));
         pub[5] = uint256(uint160(address(0xBAD))); // steal recipient
         assertFalse(withdraw.verifyProof(proof, pub));
@@ -75,16 +75,17 @@ contract VerifiersTest is Test {
         Transfer2x3Verifier v23 = new Transfer2x3Verifier();
         Transfer1x3Verifier v13 = new Transfer1x3Verifier();
         (uint256[8] memory proof, uint256[] memory inputs) = _load("transfer_2x3");
-        assertEq(inputs.length, 19);
-        uint256[19] memory pub;
-        for (uint256 i = 0; i < 19; i++) pub[i] = inputs[i];
+        assertEq(inputs.length, 20);
+        uint256[20] memory pub;
+        for (uint256 i = 0; i < 20; i++) pub[i] = inputs[i];
         assertTrue(v23.verifyProof(proof, pub));
         (proof, inputs) = _load("transfer_1x3");
-        assertEq(inputs.length, 17);
-        uint256[17] memory pub1;
-        for (uint256 i = 0; i < 17; i++) pub1[i] = inputs[i];
+        assertEq(inputs.length, 18);
+        uint256[18] memory pub1;
+        for (uint256 i = 0; i < 18; i++) pub1[i] = inputs[i];
         assertTrue(v13.verifyProof(proof, pub1));
-        assertEq(v23.vkPoints().length, 14 + 2 * 20);
+        // 20 public inputs + IC0, each G1 point is two words.
+        assertEq(v23.vkPoints().length, 14 + 2 * 21);
     }
 
     function _batchArgs()
@@ -143,9 +144,9 @@ contract VerifiersTest is Test {
 
     function test_rejects_non_canonical_input() public view {
         (uint256[8] memory proof, uint256[] memory inputs) = _load("withdraw");
-        uint256[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = inputs[i];
-        pub[6] = type(uint256).max;
+        uint256[8] memory pub;
+        for (uint256 i = 0; i < 8; i++) pub[i] = inputs[i];
+        pub[7] = type(uint256).max;
         assertFalse(withdraw.verifyProof(proof, pub));
     }
 }

@@ -24,6 +24,9 @@ pub struct WithdrawCircuit {
     pub recipient: Fr,
     /// fee paid to the relayer/aggregator out of `amount`
     pub fee: Amount,
+    /// EVM address that must submit the transaction (`msg.sender`) and receives `fee`;
+    /// bound into the proof so nobody else can front-run the relayer and take the fee
+    pub relayer: Fr,
     pub input: OpenCommitment,
     pub merkle_proof: MTProof,
 }
@@ -35,10 +38,29 @@ pub struct Withdraw {
     pub amount: Amount,
     pub recipient: Fr,
     pub fee: Amount,
+    /// relayer address as a field element (see `WithdrawCircuit::relayer`)
+    pub relayer: Fr,
     pub nullifier: Nullifier,
     pub freezer: Nullifier,
     pub merkle_version: u32,
     pub merkle_root: Fr,
+}
+
+impl Withdraw {
+    /// Public inputs in the exact order the circuit allocates them:
+    /// `[asset, amount, nullifier, freezer, root, recipient, fee, relayer]`.
+    pub fn public_inputs(&self) -> Vec<Fr> {
+        vec![
+            Fr::from(self.asset),
+            Fr::from(self.amount),
+            self.nullifier,
+            self.freezer,
+            self.merkle_root,
+            self.recipient,
+            Fr::from(self.fee),
+            self.relayer,
+        ]
+    }
 }
 
 impl WithdrawCircuit {
@@ -54,6 +76,7 @@ impl WithdrawCircuit {
             amount: self.amount,
             recipient: self.recipient,
             fee: self.fee,
+            relayer: self.relayer,
             merkle_version: self.merkle_proof.version,
             merkle_root: self.merkle_proof.root,
         }
@@ -72,13 +95,16 @@ impl ConstraintSynthesizer<Fr> for WithdrawCircuit {
         let merkle_root_var = FpVar::new_input(cs.clone(), || Ok(utxo.merkle_root))?;
         let recipient_var = FpVar::new_input(cs.clone(), || Ok(utxo.recipient))?;
         let fee_var = FpVar::new_input(cs.clone(), || Ok(Fr::from(utxo.fee)))?;
+        let relayer_var = FpVar::new_input(cs.clone(), || Ok(utxo.relayer))?;
 
-        // Bind recipient and fee to the proof. Groth16 does not bind a public input that
-        // appears in no constraint, so tie each one to a witness copy.
+        // Bind recipient, fee and relayer to the proof. Groth16 does not bind a public input
+        // that appears in no constraint, so tie each one to a witness copy.
         let recipient_w = FpVar::new_witness(cs.clone(), || Ok(utxo.recipient))?;
         recipient_var.enforce_equal(&recipient_w)?;
         let fee_w = FpVar::new_witness(cs.clone(), || Ok(Fr::from(utxo.fee)))?;
         fee_var.enforce_equal(&fee_w)?;
+        let relayer_w = FpVar::new_witness(cs.clone(), || Ok(utxo.relayer))?;
+        relayer_var.enforce_equal(&relayer_w)?;
 
         // Allocate private witness data
         let sk_fr = self.keypair.secret_to_fq();
@@ -160,6 +186,7 @@ pub fn setup<R: Rng + CryptoRng>(rng: &mut R) -> crate::Result<(ProvingKey, Veri
         amount: 1,
         recipient: Fr::from(0u64),
         fee: 0,
+        relayer: Fr::from(0u64),
         input,
         merkle_proof,
     };
@@ -181,15 +208,7 @@ pub fn prove<R: Rng + CryptoRng>(
 
 /// Verify a Groth16 proof for a UTXO transaction
 pub fn verify(vk: &VerifyingKey, utxo: &Withdraw, proof: &Proof) -> crate::Result<()> {
-    let mut publics = Vec::new();
-
-    publics.push(Fr::from(utxo.asset));
-    publics.push(Fr::from(utxo.amount));
-    publics.push(utxo.nullifier);
-    publics.push(utxo.freezer);
-    publics.push(utxo.merkle_root);
-    publics.push(utxo.recipient);
-    publics.push(Fr::from(utxo.fee));
+    let publics = utxo.public_inputs();
 
     let res = Groth16::<Bn254>::verify(vk, &publics, proof).map_err(|_| AzError::Groth16Verify)?;
 
@@ -256,6 +275,7 @@ mod tests {
             amount,
             recipient,
             fee: 3,
+            relayer: Fr::from(0x5e1a_u64),
             input,
             merkle_proof,
         };
@@ -277,5 +297,9 @@ mod tests {
         let mut refee = utxo.clone();
         refee.fee = 4;
         assert!(verify(&vk, &refee, &proof).is_err());
+
+        let mut stolen_fee = utxo.clone();
+        stolen_fee.relayer = Fr::from(0xbad_u64);
+        assert!(verify(&vk, &stolen_fee, &proof).is_err());
     }
 }

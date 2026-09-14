@@ -1,8 +1,7 @@
-use crate::{AzError, Keypair, MTNode, MTProof, OpenCommitment, TREE_DEPTH};
+use crate::{AzError, Keypair, MTNode, MTProof, OpenCommitment, TREE_DEPTH, ext::OWNER_MEMO_LEN};
 use ark_bn254::{Bn254, Fr};
 use ark_crypto_primitives::snark::SNARK;
 use ark_groth16::Groth16;
-use ark_serialize::CanonicalDeserialize;
 use ark_std::rand::{CryptoRng, Rng};
 
 pub use crate::utxo::{AuditCircuit, Utxo, UtxoCircuit, UtxoInput, UtxoOutput};
@@ -59,7 +58,7 @@ pub fn setup<R: Rng + CryptoRng>(
     for _ in 0..num_outputs {
         let commitment = OpenCommitment::generate(rng, 0, 0, keypair.public);
 
-        outputs.push(UtxoOutput { commitment });
+        outputs.push(UtxoOutput { commitment, memo: vec![0u8; OWNER_MEMO_LEN] });
     }
 
     let audit = if is_audit {
@@ -101,23 +100,7 @@ pub fn prove<R: Rng + CryptoRng>(
 
 /// Verify a Groth16 proof for a UTXO transaction
 pub fn verify(vk: &VerifyingKey, utxo: &Utxo, proof: &Proof) -> crate::Result<()> {
-    let mut publics = utxo.nullifiers.clone();
-    publics.extend(&utxo.freezers);
-    publics.extend(&utxo.commitments);
-    publics.push(utxo.merkle_root);
-
-    if let Some(audit) = &utxo.audit {
-        publics.push(audit.auditor.x);
-        publics.push(audit.auditor.y);
-
-        for memo_bytes in &audit.memos {
-            for bytes in memo_bytes[64..].chunks(32) {
-                // skip first pk
-                let ct = Fr::deserialize_compressed(bytes).map_err(|_| AzError::Groth16Verify)?;
-                publics.push(ct);
-            }
-        }
-    }
+    let publics = utxo.public_inputs()?;
 
     let res = Groth16::<Bn254>::verify(vk, &publics, proof).map_err(|_| AzError::Groth16Verify)?;
 
@@ -223,7 +206,8 @@ mod tests {
         let mut outputs = vec![];
         for _ in 0..3 {
             let commitment = OpenCommitment::generate(rng, asset, amount2, keypair.public);
-            outputs.push(UtxoOutput { commitment });
+            let memo = commitment.memo_encrypt(rng).unwrap();
+            outputs.push(UtxoOutput { commitment, memo });
         }
 
         // Setup with 3 input and 3 output
@@ -289,7 +273,8 @@ mod tests {
         for _ in 0..3 {
             let commitment = OpenCommitment::generate(rng, asset, amount2, keypair.public);
             let (memo, share) = commitment.audit_encrypt(rng, &auditor.public).unwrap();
-            outputs.push(UtxoOutput { commitment });
+            let owner_memo = commitment.memo_encrypt(rng).unwrap();
+            outputs.push(UtxoOutput { commitment, memo: owner_memo });
             audit_memos.push(memo);
             audit_shares.push(share);
         }
@@ -316,5 +301,10 @@ mod tests {
 
         // Verify
         verify(&vk, &utxo, &proof).unwrap();
+
+        // A swapped owner memo must not verify (mempool front-running protection)
+        let mut swapped = utxo.clone();
+        swapped.memos[0][40] ^= 1;
+        assert!(verify(&vk, &swapped, &proof).is_err());
     }
 }

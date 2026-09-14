@@ -16,3 +16,4 @@ ark-crypto-primitives = { version = "0.5", features = ["crh", "r1cs"] }
 ark-groth16 = "0.5"
 rand_chacha = "0.3"
 sha2 = "0.10"
+sha3 = "0.10"

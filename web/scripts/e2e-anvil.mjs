@@ -87,7 +87,7 @@ async function deposit(wallet, sh, amount) {
   const commLe = w.compute_commitment(1n, lo(amount), hi(amount), sh.pk, blind)
   const ownerMemo = w.owner_memo_encrypt(1n, lo(amount), hi(amount), sh.pk, blind, rnd())
   const ab = w.audit_memo_encrypt(1n, lo(amount), hi(amount), sh.pk, blind, auditorPk, rnd())
-  const proof = await t('deposit_prove', async () => w.deposit_prove(loadPk('deposit'), 1n, lo(amount), hi(amount), sh.pk, blind, auditorPk, ab.slice(0, 160), ab.slice(160), rnd()))()
+  const proof = await t('deposit_prove', async () => w.deposit_prove(loadPk('deposit'), 1n, lo(amount), hi(amount), sh.pk, blind, ownerMemo, auditorPk, ab.slice(0, 160), ab.slice(160), rnd()))()
   return tx(wallet, { address: dep.app, abi: appAbi, functionName: 'deposit', args: [1n, amount, BigInt(hex(w.fr_to_evm(commLe))), hex(ownerMemo), hex(ab.slice(0, 160)), words(w.proof_to_evm(proof))] })
 }
 
@@ -109,7 +109,7 @@ async function transfer(wallet, sh, inputs, toPk, amount) {
 
 async function withdraw(wallet, sh, u, recipient) {
   const mp = Buffer.from(sh.tree.proof(u.index))
-  const proof = await t('withdraw_prove', async () => w.withdraw_prove(loadPk('withdraw'), sh.sk, u.asset, lo(u.amount), hi(u.amount), hexToBuf(recipient), 0n, 0n, u.asset, lo(u.amount), hi(u.amount), sh.pk, u.blind, mp.subarray(0, 1280), mp.readUInt32LE(1320), mp.subarray(1280, 1312), mp.readUInt32LE(1312), mp.readUInt32LE(1316), rnd()))()
+  const proof = await t('withdraw_prove', async () => w.withdraw_prove(loadPk('withdraw'), sh.sk, u.asset, lo(u.amount), hi(u.amount), hexToBuf(recipient), 0n, 0n, hexToBuf(wallet.account.address), u.asset, lo(u.amount), hi(u.amount), sh.pk, u.blind, mp.subarray(0, 1280), mp.readUInt32LE(1320), mp.subarray(1280, 1312), mp.readUInt32LE(1312), mp.readUInt32LE(1316), rnd()))()
   return tx(wallet, { address: dep.app, abi: appAbi, functionName: 'withdraw', args: [u.asset, u.amount, BigInt(u.nullifier), BigInt(u.freezer), sh.root(), recipient, 0n, words(w.proof_to_evm(proof))] })
 }
 

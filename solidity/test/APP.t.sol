@@ -4,12 +4,21 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {APP} from "../src/APP.sol";
 import {TestToken} from "../src/TestToken.sol";
+import {FeeOnTransferToken} from "./FeeOnTransferToken.sol";
 import {DepositVerifier} from "../src/verifiers/DepositVerifier.sol";
 import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
 import {Transfer1Verifier} from "../src/verifiers/Transfer1Verifier.sol";
 import {Transfer2x3Verifier} from "../src/verifiers/Transfer2x3Verifier.sol";
 import {Transfer1x3Verifier} from "../src/verifiers/Transfer1x3Verifier.sol";
 import {WithdrawVerifier} from "../src/verifiers/WithdrawVerifier.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+/// @dev Test-only implementation used to prove a UUPS upgrade preserves APP storage.
+contract APPV2 is APP {
+    function version2() external pure returns (string memory) {
+        return "2.0.1";
+    }
+}
 
 /// End-to-end flow with real proofs from `cargo run -p app-tools -- e2e`:
 ///   alice deposits 600 + 400 -> transfers 700 to bob + 300 change -> bob withdraws 700 (fee 5)
@@ -19,6 +28,7 @@ import {WithdrawVerifier} from "../src/verifiers/WithdrawVerifier.sol";
 contract APPTest is Test {
     APP app;
     TestToken usd;
+    APP.Verifiers v;
     string json;
 
     address alice = address(0xA11CE);
@@ -30,7 +40,7 @@ contract APPTest is Test {
 
     function setUp() public {
         json = vm.readFile("test/fixtures/e2e.json");
-        APP.Verifiers memory v = APP.Verifiers({
+        v = APP.Verifiers({
             deposit: address(new DepositVerifier()),
             transfer2x2: address(new TransferVerifier()),
             transfer1x2: address(new Transfer1Verifier()),
@@ -38,7 +48,11 @@ contract APPTest is Test {
             transfer1x3: address(new Transfer1x3Verifier()),
             withdraw: address(new WithdrawVerifier())
         });
-        app = new APP(v, vm.parseJsonUint(json, ".auditorX"), vm.parseJsonUint(json, ".auditorY"), auditorAdmin);
+        APP impl = new APP();
+        app = APP(address(new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(APP.initialize, (v, vm.parseJsonUint(json, ".auditorX"), vm.parseJsonUint(json, ".auditorY"), auditorAdmin, address(this)))
+        )));
         app.setOperator(operator, true);
         usd = new TestToken("Test USD", "tUSD", 6);
         app.registerAsset(ASSET, address(usd));
@@ -95,7 +109,11 @@ contract APPTest is Test {
     }
 
     function _withdraw(address to, uint128 fee) internal {
-        vm.prank(relayer);
+        _withdrawFrom(relayer, to, fee);
+    }
+
+    function _withdrawFrom(address caller, address to, uint128 fee) internal {
+        vm.prank(caller);
         app.withdraw(
             ASSET,
             700,
@@ -230,6 +248,15 @@ contract APPTest is Test {
         _withdraw(recipient, 6);
     }
 
+    function test_withdraw_relayer_is_proof_bound() public {
+        _deposit(".deposits[0]");
+        _deposit(".deposits[1]");
+        _transfer(_transferArgs());
+
+        vm.expectRevert(APP.InvalidProof.selector);
+        _withdrawFrom(address(0xBEEF), recipient, 5);
+    }
+
     function test_tampered_transfer_rejected() public {
         _deposit(".deposits[0]");
         _deposit(".deposits[1]");
@@ -237,6 +264,55 @@ contract APPTest is Test {
         t.commitments[0] ^= 1;
         vm.expectRevert(APP.InvalidProof.selector);
         _transfer(t);
+    }
+
+    function test_tampered_owner_memo_rejected() public {
+        _deposit(".deposits[0]");
+        _deposit(".deposits[1]");
+        T memory t = _transferArgs();
+        bytes memory memo = t.ownerMemos[0];
+        memo[0] = bytes1(uint8(memo[0]) ^ 1);
+        t.ownerMemos[0] = memo;
+        vm.expectRevert(APP.InvalidProof.selector);
+        _transfer(t);
+    }
+
+    function test_fee_on_transfer_deposit_rejected() public {
+        FeeOnTransferToken taxed = new FeeOnTransferToken();
+        APP impl = new APP();
+        APP taxedApp = APP(address(new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(APP.initialize, (v, vm.parseJsonUint(json, ".auditorX"), vm.parseJsonUint(json, ".auditorY"), auditorAdmin, address(this)))
+        )));
+        taxedApp.registerAsset(ASSET, address(taxed));
+        taxed.mint(alice, 600);
+        vm.startPrank(alice);
+        taxed.approve(address(taxedApp), type(uint256).max);
+        vm.expectRevert(APP.AmountMismatch.selector);
+        taxedApp.deposit(
+            ASSET,
+            600,
+            vm.parseJsonUint(json, ".deposits[0].commitment"),
+            vm.parseJsonBytes(json, ".deposits[0].ownerMemo"),
+            vm.parseJsonBytes(json, ".deposits[0].auditMemo"),
+            _proof(".deposits[0]")
+        );
+        vm.stopPrank();
+        assertEq(taxed.balanceOf(address(taxedApp)), 0);
+    }
+
+    function test_uups_upgrade_preserves_pool_state() public {
+        _deposit(".deposits[0]");
+        uint256 root = app.getLastRoot();
+        uint32 leafIndex = app.nextLeafIndex();
+        address token = app.assetToken(ASSET);
+
+        app.upgradeToAndCall(address(new APPV2()), bytes(""));
+
+        assertEq(APPV2(address(app)).version2(), "2.0.1");
+        assertEq(app.getLastRoot(), root);
+        assertEq(app.nextLeafIndex(), leafIndex);
+        assertEq(app.assetToken(ASSET), token);
     }
 
     function test_deposit_needs_registered_asset() public {

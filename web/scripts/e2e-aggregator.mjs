@@ -100,7 +100,7 @@ async function deposit(wallet, sh, amount) {
   const commLe = w.compute_commitment(1n, lo(amount), hi(amount), sh.pk, blind)
   const ownerMemo = w.owner_memo_encrypt(1n, lo(amount), hi(amount), sh.pk, blind, rnd())
   const ab = w.audit_memo_encrypt(1n, lo(amount), hi(amount), sh.pk, blind, auditorPk, rnd())
-  const proof = w.deposit_prove(loadPk('deposit'), 1n, lo(amount), hi(amount), sh.pk, blind, auditorPk, ab.slice(0, 160), ab.slice(160), rnd())
+  const proof = w.deposit_prove(loadPk('deposit'), 1n, lo(amount), hi(amount), sh.pk, blind, ownerMemo, auditorPk, ab.slice(0, 160), ab.slice(160), rnd())
   return tx(wallet, { address: dep.app, abi: appAbi, functionName: 'deposit', args: [1n, amount, BigInt(hex(w.fr_to_evm(commLe))), hex(ownerMemo), hex(ab.slice(0, 160)), words(w.proof_to_evm(proof))] })
 }
 
@@ -128,7 +128,7 @@ async function transferViaAggregator(sh, inputs, toPk, amount, info) {
 async function withdrawViaAggregator(sh, u, recipient, info) {
   const fee = BigInt(info.withdraw_fee)
   const mp = Buffer.from(sh.tree.proof(u.index))
-  const proof = w.withdraw_prove(loadPk('withdraw'), sh.sk, u.asset, lo(u.amount), hi(u.amount), hexToBuf(recipient), lo(fee), hi(fee), u.asset, lo(u.amount), hi(u.amount), sh.pk, u.blind, mp.subarray(0, 1280), mp.readUInt32LE(1320), mp.subarray(1280, 1312), mp.readUInt32LE(1312), mp.readUInt32LE(1316), rnd())
+  const proof = w.withdraw_prove(loadPk('withdraw'), sh.sk, u.asset, lo(u.amount), hi(u.amount), hexToBuf(recipient), lo(fee), hi(fee), hexToBuf(info.operator), u.asset, lo(u.amount), hi(u.amount), sh.pk, u.blind, mp.subarray(0, 1280), mp.readUInt32LE(1320), mp.subarray(1280, 1312), mp.readUInt32LE(1312), mp.readUInt32LE(1316), rnd())
   const res = await api('/chains/31337/tx/withdraw', {
     proof: hex(w.proof_to_evm(proof)), asset: Number(u.asset), amount: u.amount.toString(), nullifier: u.nullifier, freezer: u.freezer,
     root: sh.root(), recipient, fee: fee.toString(),

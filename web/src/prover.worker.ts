@@ -10,6 +10,7 @@ export type ProveRequest =
       amount: bigint
       ownerPk: Uint8Array
       blind: Uint8Array
+      ownerMemo: Uint8Array // 104
       auditorPk: Uint8Array
       auditMemo: Uint8Array // 160
       auditShare: Uint8Array // 32
@@ -30,6 +31,7 @@ export type ProveRequest =
       amount: bigint
       recipient: Uint8Array // 20
       fee: bigint
+      relayer: Uint8Array // 20
       inputBlind: Uint8Array
       ownerPk: Uint8Array
       merkleProof: Uint8Array // blob from WasmMerkleTree.proof
@@ -78,6 +80,7 @@ async function prove(req: ProveRequest): Promise<unknown> {
         hi(req.amount),
         req.ownerPk,
         req.blind,
+        req.ownerMemo,
         req.auditorPk,
         req.auditMemo,
         req.auditShare,
@@ -107,6 +110,7 @@ async function prove(req: ProveRequest): Promise<unknown> {
         req.recipient,
         lo(req.fee),
         hi(req.fee),
+        req.relayer,
         req.asset,
         lo(req.amount),
         hi(req.amount),

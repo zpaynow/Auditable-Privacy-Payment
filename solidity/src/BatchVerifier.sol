@@ -33,7 +33,7 @@ library BatchVerifier {
         uint8[] memory groupOf,
         uint256[8][] memory proofs,
         uint256[][] memory publics
-    ) internal view returns (bool) {
+    ) public view returns (bool) {
         uint256 n = proofs.length;
         if (n == 0 || groupOf.length != n || publics.length != n) return false;
 
@@ -135,7 +135,7 @@ library BatchVerifier {
     function _mul(uint256 x, uint256 y, uint256 s) private view returns (bool ok, uint256 rx, uint256 ry) {
         uint256[3] memory input = [x, y, s];
         uint256[2] memory out;
-        assembly {
+        assembly ("memory-safe") {
             ok := staticcall(10000, 7, input, 96, out, 64)
         }
         rx = out[0];
@@ -145,7 +145,7 @@ library BatchVerifier {
     function _add(uint256 x1, uint256 y1, uint256 x2, uint256 y2) private view returns (bool ok, uint256 rx, uint256 ry) {
         uint256[4] memory input = [x1, y1, x2, y2];
         uint256[2] memory out;
-        assembly {
+        assembly ("memory-safe") {
             ok := staticcall(2000, 6, input, 128, out, 64)
         }
         rx = out[0];
@@ -157,7 +157,7 @@ library BatchVerifier {
         uint256 result;
         // 34k per pair + 45k base (EIP-1108); a little headroom, never the whole gas budget
         uint256 gasLimit = 34000 * (words / 6) + 60000;
-        assembly {
+        assembly ("memory-safe") {
             ok := staticcall(gasLimit, 8, add(data, 32), mul(words, 32), 0, 32)
             result := mload(0)
         }

@@ -1,7 +1,7 @@
 use crate::{
-    Keypair, MTProof, OpenCommitment, PublicKey, audit_gadget::audit_encrypt_gadget,
-    commitment::commitment_gadget, keys::keypair_gadget, merkle_tree::merkle_proof_gadget,
-    nullifier::nullifier_gadget,
+    AzError, Keypair, MTProof, OpenCommitment, PublicKey, audit_gadget::audit_encrypt_gadget,
+    commitment::commitment_gadget, ext::memos_hash, keys::keypair_gadget,
+    merkle_tree::merkle_proof_gadget, nullifier::nullifier_gadget,
 };
 use ark_bn254::Fr;
 use ark_r1cs_std::{
@@ -12,7 +12,6 @@ use ark_r1cs_std::{
 };
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 use ark_serialize::CanonicalDeserialize;
-use ark_std::rand::{CryptoRng, Rng};
 
 /// UTXO transaction circuit
 /// Proves correct spending of inputs and creation of outputs with privacy
@@ -38,10 +37,38 @@ pub struct Utxo {
     pub nullifiers: Vec<Fr>,
     pub freezers: Vec<Fr>,
     pub commitments: Vec<Fr>,
+    /// owner memos, one per output (calldata, hashed into the last public input)
     pub memos: Vec<Vec<u8>>,
     pub merkle_version: u32,
     pub merkle_root: Fr,
     pub audit: Option<Audit>,
+}
+
+impl Utxo {
+    /// keccak256(ownerMemo_0 || auditMemo_0 || ownerMemo_1 || …) mod r — the last public input.
+    pub fn memos_hash(&self) -> Fr {
+        memos_hash(&self.memos, self.audit.as_ref().map(|a| a.memos.as_slice()))
+    }
+
+    /// Public inputs in the exact order the circuit allocates them:
+    /// `[nullifiers…, freezers…, commitments…, root, (auditorX, auditorY, ct×3 per output), memosHash]`.
+    pub fn public_inputs(&self) -> crate::Result<Vec<Fr>> {
+        let mut v = self.nullifiers.clone();
+        v.extend(&self.freezers);
+        v.extend(&self.commitments);
+        v.push(self.merkle_root);
+        if let Some(audit) = &self.audit {
+            v.push(audit.auditor.x);
+            v.push(audit.auditor.y);
+            for memo in &audit.memos {
+                for bytes in memo[64..].chunks(32) {
+                    v.push(Fr::deserialize_compressed(bytes).map_err(|_| AzError::Groth16Verify)?);
+                }
+            }
+        }
+        v.push(self.memos_hash());
+        Ok(v)
+    }
 }
 
 /// UTXO public inputs
@@ -52,52 +79,9 @@ pub struct Audit {
 }
 
 impl UtxoCircuit {
-    /// generate public used utxo
-    pub fn utxo<R: CryptoRng + Rng>(&self, prng: &mut R) -> crate::Result<Utxo> {
-        assert!(!self.inputs.is_empty());
-
-        let nullifiers = self
-            .inputs
-            .iter()
-            .map(|input| input.commitment.nullify(&self.keypair))
-            .collect();
-        let freezers = self
-            .inputs
-            .iter()
-            .map(|input| input.commitment.freeze())
-            .collect();
-        let commitments = self
-            .outputs
-            .iter()
-            .map(|output| output.commitment.commit())
-            .collect();
-
-        let mut memos = vec![];
-        for output in self.outputs.iter() {
-            memos.push(output.commitment.memo_encrypt(prng)?);
-        }
-
-        let merkle_version = self.inputs[0].merkle_proof.version;
-        let merkle_root = self.inputs[0].merkle_proof.root;
-
-        let audit = if let Some(audit) = &self.audit {
-            Some(Audit {
-                auditor: audit.auditor,
-                memos: audit.memos.clone(),
-            })
-        } else {
-            None
-        };
-
-        Ok(Utxo {
-            nullifiers,
-            freezers,
-            commitments,
-            memos,
-            merkle_version,
-            merkle_root,
-            audit,
-        })
+    /// Public part of this transfer (everything the contract call needs).
+    pub fn utxo(&self) -> Utxo {
+        self.publics()
     }
 
     /// generate public inputs
@@ -139,7 +123,7 @@ impl UtxoCircuit {
             merkle_root,
             merkle_version,
             audit,
-            memos: vec![],
+            memos: self.outputs.iter().map(|o| o.memo.clone()).collect(),
         }
     }
 }
@@ -155,6 +139,8 @@ pub struct UtxoInput {
 #[derive(Clone)]
 pub struct UtxoOutput {
     pub commitment: OpenCommitment,
+    /// owner memo (`OpenCommitment::memo_encrypt`), bound into the proof via `memos_hash`
+    pub memo: Vec<u8>,
 }
 
 impl ConstraintSynthesizer<Fr> for UtxoCircuit {
@@ -336,6 +322,13 @@ impl ConstraintSynthesizer<Fr> for UtxoCircuit {
             }
         }
 
+        // Bind the calldata hash (owner memo || audit memo per output). A public input that
+        // appears in no constraint is not bound by Groth16, so tie it to a witness copy.
+        let memos_hash = utxo.memos_hash();
+        let ext_var = FpVar::new_input(cs.clone(), || Ok(memos_hash))?;
+        let ext_w = FpVar::new_witness(cs.clone(), || Ok(memos_hash))?;
+        ext_var.enforce_equal(&ext_w)?;
+
         Ok(())
     }
 }
@@ -372,6 +365,7 @@ mod tests {
 
         // Create output UTXO (same amount, different blind)
         let output_comm = OpenCommitment::generate(rng, asset, amount, keypair.public);
+        let memo = output_comm.memo_encrypt(rng).unwrap();
 
         // Create circuit
         let circuit = UtxoCircuit {
@@ -382,6 +376,7 @@ mod tests {
             }],
             outputs: vec![UtxoOutput {
                 commitment: output_comm,
+                memo,
             }],
             audit: None,
         };

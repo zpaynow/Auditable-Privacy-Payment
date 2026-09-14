@@ -22,6 +22,9 @@ abstract contract IncrementalMerkleTree {
     uint32 public currentRootIndex;
     uint32 public nextLeafIndex;
 
+    /// @dev reserved for future state variables (the tree lives behind an upgradeable proxy)
+    uint256[20] private __gap;
+
     error TreeFull();
 
     /// @dev Insert one leaf; returns its index. ~20 hashes.

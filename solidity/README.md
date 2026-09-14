@@ -12,7 +12,16 @@ src/
   verifiers/                generated: cargo run -p app-tools -- setup
 test/fixtures/              generated: setup / poseidon-sol / e2e (real proofs from Rust)
 script/Deploy.s.sol         deploys everything, writes deployments/<chainId>.json
+script/Upgrade.s.sol        upgrades the proxy implementation / rotates verifiers
 ```
+
+`APP` runs behind an ERC-1967 (UUPS) proxy. The `app` address in `deployments/<chainId>.json` is
+the proxy and is the address users and services talk to; `appImpl` is only the implementation.
+`PoseidonT3` and `BatchVerifier` are linked libraries deployed separately, because inlining them
+puts `APP` over the 24 KB contract-size limit. Forge deploys and links them automatically through
+the standard CREATE2 factory, and records their addresses under `libraries` in
+`broadcast/Deploy.s.sol/<chainId>/run-latest.json`. Keep those addresses: source verification on a
+block explorer needs them.
 
 ## Regenerate + test
 
@@ -49,7 +58,10 @@ forge test
    # optional: AUDITOR_ADMIN=0x… (address allowed to freeze, default deployer)
    # optional: OPERATOR=0x…      (address allowed to call submitBatch, default deployer;
    #                              must be the aggregator's OPERATOR_KEY address)
-   # optional: TOKEN=0x…         (register an existing ERC20 instead of deploying TestToken)
+   # optional: TOKEN=0x…         (register an existing ERC20 instead of deploying TestToken;
+   #                              must be a plain ERC20: no transfer fee, no rebasing)
+   # optional: OWNER=0x…         (proxy owner: may upgrade, pause and rotate verifiers;
+   #                              default deployer. Use a multisig for anything valuable)
    forge script script/Deploy.s.sol --rpc-url https://rpc.bohr.life --private-key $PK --broadcast
    # verify sources (optional):
    #   forge script … --verify --etherscan-api-key $BASESCAN_KEY
@@ -57,8 +69,12 @@ forge test
 
    Output: `deployments/968.json` (or `84532.json` for Base Sepolia; commit it). Then `cd ../web && ./scripts/sync.sh` so the web
    app and the aggregator pick up the addresses and ABI. More operators can be added later with
-   `cast send $APP "setOperator(address,bool)" $OP true`. Anyone with the same `app-tools setup` seed gets identical proving keys, so
-   `web/public/keys` always matches the deployed verifiers.
+   `cast send $APP "setOperator(address,bool)" $OP true`.
+
+   `web/public/keys` must come from the very same `app-tools setup` run as the deployed
+   verifiers. The setup randomness is drawn from the OS and never written down, so the keys
+   cannot be reproduced afterwards: if you lose `../artifacts`, you must re-run setup and
+   redeploy every verifier. Never generate deployed verifiers with `--insecure-seed`.
 
 ## Gas (via-IR, forge tests + anvil)
 

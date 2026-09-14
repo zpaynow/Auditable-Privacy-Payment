@@ -118,6 +118,7 @@ pub fn deposit_setup(is_audit: bool, seed: &[u8]) -> std::result::Result<Vec<u8>
 /// - amount: amount (u128, as two u64s: low, high)
 /// - owner_pk: owner public key bytes (64 bytes)
 /// - blind: blind factor bytes (32 bytes)
+/// - owner_memo: 104-byte encrypted owner memo, bound into the proof
 /// - auditor_pk: optional auditor public key (64 bytes), empty if not audited
 /// - audit_memo: optional audit memo bytes, empty if not audited
 /// - audit_share: optional audit share bytes (32 bytes), empty if not audited
@@ -130,6 +131,7 @@ pub fn deposit_prove(
     amount_high: u64,
     owner_pk: &[u8],
     blind: &[u8],
+    owner_memo: &[u8],
     auditor_pk: &[u8],
     audit_memo: &[u8],
     audit_share: &[u8],
@@ -144,6 +146,9 @@ pub fn deposit_prove(
     }
     if blind.len() != 32 {
         return Err(JsValue::from_str("Blind must be 32 bytes"));
+    }
+    if owner_memo.len() != 104 {
+        return Err(JsValue::from_str("Owner memo must be 104 bytes"));
     }
 
     let mut seed_array = [0u8; 32];
@@ -206,6 +211,7 @@ pub fn deposit_prove(
         asset,
         amount,
         output,
+        memo: owner_memo.to_vec(),
         audit,
     };
 
@@ -229,12 +235,16 @@ pub fn deposit_verify(
     amount_low: u64,
     amount_high: u64,
     commitment: &[u8],
+    owner_memo: &[u8],
     auditor_pk: &[u8],
     audit_memo: &[u8],
 ) -> std::result::Result<bool, JsValue> {
 
     if commitment.len() != 32 {
         return Err(JsValue::from_str("Commitment must be 32 bytes"));
+    }
+    if owner_memo.len() != 104 {
+        return Err(JsValue::from_str("Owner memo must be 104 bytes"));
     }
 
     let vk = transfer::VerifyingKey::deserialize_compressed(vk_bytes)
@@ -271,7 +281,7 @@ pub fn deposit_verify(
         asset,
         amount,
         commitment: commitment_fr,
-        memo: vec![],
+        memo: owner_memo.to_vec(),
         audit,
     };
 
@@ -359,6 +369,7 @@ pub fn withdraw_setup(seed: &[u8]) -> std::result::Result<Vec<u8>, JsValue> {
 /// merkle_nodes: flat array of [left, right, left, right, ...] for TREE_DEPTH nodes (32 bytes each)
 /// recipient: 20-byte EVM address (big-endian), bound into the proof
 /// fee: amount paid to the relayer out of `amount` (u128 as two u64s)
+/// relayer: 20-byte EVM account bound into the proof and paid `fee`
 #[wasm_bindgen]
 pub fn withdraw_prove(
     pk_bytes: &[u8],
@@ -369,6 +380,7 @@ pub fn withdraw_prove(
     recipient: &[u8],
     fee_low: u64,
     fee_high: u64,
+    relayer: &[u8],
     input_asset: u64,
     input_amount_low: u64,
     input_amount_high: u64,
@@ -401,6 +413,7 @@ pub fn withdraw_prove(
         return Err(JsValue::from_str(&format!("Merkle nodes must be {} bytes (TREE_DEPTH * 2 * 32)", TREE_DEPTH * 2 * 32)));
     }
     let recipient_fr = address_to_fr(recipient)?;
+    let relayer_fr = address_to_fr(relayer)?;
     let fee: u128 = ((fee_high as u128) << 64) | (fee_low as u128);
 
     let mut seed_array = [0u8; 32];
@@ -460,6 +473,7 @@ pub fn withdraw_prove(
         amount,
         recipient: recipient_fr,
         fee,
+        relayer: relayer_fr,
         input,
         merkle_proof,
     };
@@ -485,6 +499,7 @@ pub fn withdraw_verify(
     recipient: &[u8],
     fee_low: u64,
     fee_high: u64,
+    relayer: &[u8],
     nullifier: &[u8],
     freezer: &[u8],
     merkle_root: &[u8],
@@ -510,6 +525,7 @@ pub fn withdraw_verify(
     let amount: u128 = ((amount_high as u128) << 64) | (amount_low as u128);
     let recipient_fr = address_to_fr(recipient)?;
     let fee: u128 = ((fee_high as u128) << 64) | (fee_low as u128);
+    let relayer_fr = address_to_fr(relayer)?;
 
     let nullifier_fr = Fr::deserialize_compressed(nullifier)
         .map_err(|e| JsValue::from_str(&format!("Nullifier deserialization error: {:?}", e)))?;
@@ -523,6 +539,7 @@ pub fn withdraw_verify(
         amount,
         recipient: recipient_fr,
         fee,
+        relayer: relayer_fr,
         nullifier: nullifier_fr,
         freezer: freezer_fr,
         merkle_version,
@@ -926,7 +943,9 @@ pub fn transfer_prove(
         let amount = u128::from_le_bytes(rec[8..24].try_into().unwrap());
         let owner = parse_pk(&rec[24..88])?;
         let blind = parse_fr(&rec[88..120], "output blind")?;
-        utxo_outputs.push(transfer::UtxoOutput { commitment: OpenCommitment { asset, amount, owner, blind } });
+        let commitment = OpenCommitment { asset, amount, owner, blind };
+        let memo = commitment.memo_encrypt(&mut rng).map_err(js_err("owner memo"))?;
+        utxo_outputs.push(transfer::UtxoOutput { commitment, memo });
     }
 
     let audit = if auditor_pk.is_empty() {
@@ -945,21 +964,13 @@ pub fn transfer_prove(
     };
 
     let circuit = transfer::UtxoCircuit { keypair, inputs: utxo_inputs, outputs: utxo_outputs, audit };
-    let utxo = circuit.utxo(&mut rng).map_err(js_err("utxo"))?;
+    let utxo = circuit.utxo();
     let proof = transfer::prove(&pk, circuit, &mut rng).map_err(js_err("prove"))?;
 
-    let mut publics = utxo.nullifiers.clone();
-    publics.extend(&utxo.freezers);
-    publics.extend(&utxo.commitments);
-    publics.push(utxo.merkle_root);
+    let publics = utxo.public_inputs().map_err(js_err("public inputs"))?;
     let mut audit_memos_out = vec![];
     if let Some(a) = &utxo.audit {
-        publics.push(a.auditor.x);
-        publics.push(a.auditor.y);
         for memo in &a.memos {
-            for bytes in memo[64..].chunks(32) {
-                publics.push(Fr::deserialize_compressed(bytes).map_err(js_err("audit ct"))?);
-            }
             audit_memos_out.push(hex(memo));
         }
     }

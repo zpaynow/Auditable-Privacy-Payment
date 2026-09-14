@@ -1,12 +1,17 @@
 //! Developer tooling for Auditable Privacy Payment.
 //!
 //! ```text
-//! app-tools setup [--seed <hex32>] [--out <dir>] [--sol <dir>] [--fixtures <dir>]
+//! app-tools setup [--out <dir>] [--sol <dir>] [--fixtures <dir>] [--insecure-seed <hex32>]
 //! ```
-//! Generates the Phase 1 circuit keys (deposit+audit, transfer 2x2+audit, withdraw),
+//! Generates the circuit keys (deposit+audit, transfer 2x2/1x2/2x3/1x3+audit, withdraw),
 //! writes `<out>/<name>.pk|.vk`, renders one Solidity verifier per circuit into `<sol>`,
 //! and writes a JSON fixture per circuit (one real proof + its public inputs) into
 //! `<fixtures>` for Foundry tests.
+//!
+//! The Groth16 setup randomness ("toxic waste") is drawn from the OS and never written
+//! anywhere: whoever knows it can forge proofs for every circuit. `--insecure-seed` makes
+//! the setup deterministic for local tests only; a verifier produced that way must never be
+//! deployed where the pool holds value.
 
 use app_payment::{
     Keypair, MemoryStorage, MerkleTree, OpenCommitment, deposit, evm, transfer, withdraw,
@@ -17,12 +22,10 @@ use ark_std::rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use std::{fs, path::Path};
 
-const DEFAULT_SEED: [u8; 32] = *b"APP-testnet-setup-seed-v1-000000";
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: app-tools setup [--seed <hex32>] [--out <dir>] [--sol <dir>] [--fixtures <dir>]\n       app-tools poseidon-sol [--sol <dir>] [--fixtures <dir>]");
+        eprintln!("usage: app-tools setup [--out <dir>] [--sol <dir>] [--fixtures <dir>] [--insecure-seed <hex32>]\n       app-tools poseidon-sol [--sol <dir>] [--fixtures <dir>]");
         std::process::exit(2);
     }
     match args[1].as_str() {
@@ -78,46 +81,40 @@ fn write_fixture(dir: &Path, name: &str, proof: &transfer::Proof, publics: &[Fr]
     fs::write(dir.join(format!("{name}.json")), json).unwrap();
 }
 
-/// Public-input vector in the exact order the circuits allocate them.
+/// Public-input vectors in the exact order the circuits allocate them (see app-payment).
 fn deposit_publics(d: &deposit::Deposit) -> Vec<Fr> {
-    let mut v = vec![Fr::from(d.asset), Fr::from(d.amount), d.commitment];
-    if let Some(a) = &d.audit {
-        v.push(a.auditor.x);
-        v.push(a.auditor.y);
-        for bytes in a.memo[64..].chunks(32) {
-            v.push(Fr::deserialize_compressed(bytes).unwrap());
-        }
-    }
-    v
+    d.public_inputs().unwrap()
 }
 
 fn transfer_publics(u: &transfer::Utxo) -> Vec<Fr> {
-    let mut v = u.nullifiers.clone();
-    v.extend(&u.freezers);
-    v.extend(&u.commitments);
-    v.push(u.merkle_root);
-    if let Some(a) = &u.audit {
-        v.push(a.auditor.x);
-        v.push(a.auditor.y);
-        for memo in &a.memos {
-            for bytes in memo[64..].chunks(32) {
-                v.push(Fr::deserialize_compressed(bytes).unwrap());
-            }
-        }
-    }
-    v
+    u.public_inputs().unwrap()
 }
 
 fn withdraw_publics(w: &withdraw::Withdraw) -> Vec<Fr> {
-    vec![
-        Fr::from(w.asset),
-        Fr::from(w.amount),
-        w.nullifier,
-        w.freezer,
-        w.merkle_root,
-        w.recipient,
-        Fr::from(w.fee),
-    ]
+    w.public_inputs()
+}
+
+/// EVM address (20 bytes) as a circuit field element.
+fn addr_fr(addr: &[u8; 20]) -> Fr {
+    app_payment::ext::address_to_fr(addr).unwrap()
+}
+
+/// Relayer / operator addresses the Foundry tests submit from (APP.t.sol, BatchBench.t.sol).
+const TEST_RELAYER: [u8; 20] = addr20(0x5E1A);
+const TEST_OPERATOR: [u8; 20] = addr20(0x0BE7);
+
+/// 32-byte little-endian secret of a keypair, the encoding `Keypair::from_secret_bytes` expects.
+fn secret_bytes(kp: &Keypair) -> Vec<u8> {
+    let mut v = vec![];
+    kp.secret.serialize_compressed(&mut v).unwrap();
+    v
+}
+
+const fn addr20(low: u16) -> [u8; 20] {
+    let mut a = [0u8; 20];
+    a[18] = (low >> 8) as u8;
+    a[19] = low as u8;
+    a
 }
 
 fn setup(args: &[String]) {
@@ -127,20 +124,27 @@ fn setup(args: &[String]) {
     for d in [&out, &sol, &fixtures] {
         fs::create_dir_all(d).unwrap();
     }
+    if args.iter().any(|a| a == "--seed") {
+        eprintln!("--seed was removed: a known seed lets anyone forge proofs. Use --insecure-seed for local tests.");
+        std::process::exit(2);
+    }
     let seed: [u8; 32] = {
-        let s = arg(args, "--seed", "");
+        let s = arg(args, "--insecure-seed", "");
         if s.is_empty() {
-            DEFAULT_SEED
+            let mut seed = [0u8; 32];
+            getrandom::getrandom(&mut seed).expect("os randomness");
+            println!("setup randomness: fresh from the OS, not recorded (keep this process output; the seed is intentionally not printed)");
+            seed
         } else {
             let raw = s.trim_start_matches("0x");
             let bytes: Vec<u8> = (0..raw.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&raw[i..i + 2], 16).expect("bad hex seed"))
                 .collect();
+            println!("WARNING: deterministic INSECURE setup seed {} — for tests only, never deploy these verifiers", hex(&bytes));
             bytes.try_into().expect("seed must be 32 bytes")
         }
     };
-    println!("setup seed: {}", hex(&seed));
     let rng = &mut ChaCha20Rng::from_seed(seed);
     // A separate rng for the sample witnesses so fixtures never touch the setup stream.
     let wrng = &mut ChaCha20Rng::from_seed([0x51u8; 32]);
@@ -154,14 +158,16 @@ fn setup(args: &[String]) {
         let owner = Keypair::generate(wrng);
         let auditor = Keypair::generate(wrng);
         let output = OpenCommitment::generate(wrng, 1, 1_000_000, owner.public);
+        let owner_memo = output.memo_encrypt(wrng).unwrap();
         let (memo, share) = output.audit_encrypt(wrng, &auditor.public).unwrap();
         let circuit = deposit::DepositCircuit {
             asset: 1,
             amount: 1_000_000,
             output,
+            memo: owner_memo,
             audit: Some(deposit::AuditCircuit { auditor: auditor.public, memo, share }),
         };
-        let publics = circuit.deposit(wrng).unwrap();
+        let publics = circuit.deposit();
         let proof = deposit::prove(&pk, circuit, wrng).unwrap();
         deposit::verify(&vk, &publics, &proof).unwrap();
         write_fixture(&fixtures, "deposit", &proof, &deposit_publics(&publics));
@@ -205,7 +211,8 @@ fn setup(args: &[String]) {
         for (amt, to) in out_amounts {
             let c = OpenCommitment::generate(wrng, 1, amt, to);
             let (m, s) = c.audit_encrypt(wrng, &auditor.public).unwrap();
-            outputs.push(transfer::UtxoOutput { commitment: c });
+            let owner_memo = c.memo_encrypt(wrng).unwrap();
+            outputs.push(transfer::UtxoOutput { commitment: c, memo: owner_memo });
             memos.push(m);
             shares.push(s);
         }
@@ -215,7 +222,7 @@ fn setup(args: &[String]) {
             outputs,
             audit: Some(transfer::AuditCircuit { auditor: auditor.public, memos, shares }),
         };
-        let publics = circuit.utxo(wrng).unwrap();
+        let publics = circuit.utxo();
         let proof = transfer::prove(&pk, circuit, wrng).unwrap();
         transfer::verify(&vk, &publics, &proof).unwrap();
         write_fixture(&fixtures, name, &proof, &transfer_publics(&publics));
@@ -233,17 +240,15 @@ fn setup(args: &[String]) {
         let idx = tree.add_leaf(c.commit()).unwrap();
         tree.commit().unwrap();
         let merkle_proof = tree.generate_proof(idx).unwrap();
-        // recipient = address(0x1234...) as uint256
-        let mut addr = [0u8; 20];
-        addr[18] = 0x12;
-        addr[19] = 0x34;
-        let recipient = ark_ff::PrimeField::from_be_bytes_mod_order(&addr);
+        // recipient = address(0x1234), relayer = address(0x5E1A) as uint256
+        let recipient = addr_fr(&addr20(0x1234));
         let circuit = withdraw::WithdrawCircuit {
             keypair: owner,
             asset: 1,
             amount: 250,
             recipient,
             fee: 5,
+            relayer: addr_fr(&TEST_RELAYER),
             input: c,
             merkle_proof,
         };
@@ -304,11 +309,13 @@ pragma solidity ^0.8.20;
 /// @notice Bit-exact port of the arkworks `PoseidonSponge` used by app-payment
 ///         (t = 3, rate = 2, capacity = 1, alpha = {alpha}, {full} full + {partial} partial rounds)
 ///         restricted to the 2-to-1 hash: absorb(left), absorb(right), squeeze(1).
+///         `hash` is public so this deploys as a linked library: inlining it into APP puts
+///         the pool over the 24 KB contract-size limit.
 ///         hash(l, r) = permute([0, l, r])[1] over the BN254 scalar field.
 library PoseidonT3 {{
     uint256 internal constant Q = {q};
 
-    function hash(uint256 l, uint256 r) internal pure returns (uint256 out) {{
+    function hash(uint256 l, uint256 r) public pure returns (uint256 out) {{
         require(l < Q && r < Q, "PoseidonT3: input not in field");
         assembly {{
             // x^31 = x^16 * x^8 * x^4 * x^2 * x
@@ -405,8 +412,6 @@ library PoseidonT3 {{
 // =============================================================================
 
 fn e2e(args: &[String]) {
-    use ark_ff::PrimeField;
-
     let keys = Path::new(&arg(args, "--keys", "artifacts")).to_path_buf();
     let fixtures = Path::new(&arg(args, "--fixtures", "solidity/test/fixtures")).to_path_buf();
     fs::create_dir_all(&fixtures).unwrap();
@@ -440,9 +445,10 @@ fn e2e(args: &[String]) {
             asset,
             amount: amt,
             output: out.clone(),
+            memo: out.memo_encrypt(rng).unwrap(),
             audit: Some(deposit::AuditCircuit { auditor: auditor.public, memo: amemo.clone(), share }),
         };
-        let publics = circuit.deposit(rng).unwrap();
+        let publics = circuit.deposit();
         let proof = deposit::prove(&dpk, circuit, rng).unwrap();
         deposit::verify(&dvk, &publics, &proof).unwrap();
         let idx = tree.add_leaf(out.commit()).unwrap();
@@ -472,10 +478,13 @@ fn e2e(args: &[String]) {
     let circuit = transfer::UtxoCircuit {
         keypair: alice.clone(),
         inputs,
-        outputs: vec![transfer::UtxoOutput { commitment: out_bob.clone() }, transfer::UtxoOutput { commitment: out_alice.clone() }],
+        outputs: vec![
+            transfer::UtxoOutput { commitment: out_bob.clone(), memo: out_bob.memo_encrypt(rng).unwrap() },
+            transfer::UtxoOutput { commitment: out_alice.clone(), memo: out_alice.memo_encrypt(rng).unwrap() },
+        ],
         audit: Some(transfer::AuditCircuit { auditor: auditor.public, memos: memos.clone(), shares }),
     };
-    let utxo = circuit.utxo(rng).unwrap();
+    let utxo = circuit.utxo();
     assert_eq!(utxo.merkle_root, root1);
     let tproof = transfer::prove(&tpk, circuit, rng).unwrap();
     transfer::verify(&tvk, &utxo, &tproof).unwrap();
@@ -494,17 +503,16 @@ fn e2e(args: &[String]) {
         words(&tproof)
     );
 
-    // --- withdraw: bob takes 700 to address 0x1234, fee 5 to relayer ---
-    let mut addr = [0u8; 20];
-    addr[18] = 0x12;
-    addr[19] = 0x34;
-    let recipient = Fr::from_be_bytes_mod_order(&addr);
+    // --- withdraw: bob takes 700 to address 0x1234, fee 5 to relayer 0x5E1A (bound in the proof) ---
+    let addr = addr20(0x1234);
+    let recipient = addr_fr(&addr);
     let circuit = withdraw::WithdrawCircuit {
         keypair: bob.clone(),
         asset,
         amount: 700,
         recipient,
         fee: 5,
+        relayer: addr_fr(&TEST_RELAYER),
         input: out_bob.clone(),
         merkle_proof: tree.generate_proof(bob_idx).unwrap(),
     };
@@ -513,8 +521,8 @@ fn e2e(args: &[String]) {
     let wproof = withdraw::prove(&wpk, circuit, rng).unwrap();
     withdraw::verify(&wvk, &wd, &wproof).unwrap();
     let withdraw_json = format!(
-        "{{\"asset\": {asset}, \"amount\": 700, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 5, \"proof\": [{}]}}",
-        be(&wd.nullifier), be(&wd.freezer), be(&root2), hex(&addr), words(&wproof)
+        "{{\"asset\": {asset}, \"amount\": 700, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 5, \"relayer\": \"{}\", \"proof\": [{}]}}",
+        be(&wd.nullifier), be(&wd.freezer), be(&root2), hex(&addr), hex(&TEST_RELAYER), words(&wproof)
     );
 
     // --- batch (Phase 2): carol and dave deposit, then one operator batch at root4 with
@@ -534,9 +542,10 @@ fn e2e(args: &[String]) {
             asset,
             amount: amt,
             output: out.clone(),
+            memo: out.memo_encrypt(rng).unwrap(),
             audit: Some(deposit::AuditCircuit { auditor: auditor.public, memo: amemo.clone(), share }),
         };
-        let publics = circuit.deposit(rng).unwrap();
+        let publics = circuit.deposit();
         let proof = deposit::prove(&dpk, circuit, rng).unwrap();
         let idx = tree.add_leaf(out.commit()).unwrap();
         if who.public == carol.public { carol_utxos.push((idx, out)); } else { dave_utxo = Some((idx, out)); }
@@ -569,10 +578,13 @@ fn e2e(args: &[String]) {
         let circuit = transfer::UtxoCircuit {
             keypair: spender.clone(),
             inputs: ins,
-            outputs: outs.iter().map(|c| transfer::UtxoOutput { commitment: c.clone() }).collect(),
+            outputs: outs
+                .iter()
+                .map(|c| transfer::UtxoOutput { commitment: c.clone(), memo: c.memo_encrypt(rng).unwrap() })
+                .collect(),
             audit: Some(transfer::AuditCircuit { auditor: auditor.public, memos: memos.clone(), shares }),
         };
-        let utxo = circuit.utxo(rng).unwrap();
+        let utxo = circuit.utxo();
         assert_eq!(utxo.merkle_root, root4);
         let proof = transfer::prove(pk, circuit, rng).unwrap();
         transfer::verify(vk, &utxo, &proof).unwrap();
@@ -593,6 +605,7 @@ fn e2e(args: &[String]) {
     let (t13_json, t13_comms) = make_transfer3(&dave, vec![dave_utxo.unwrap()], 400, 595, 5, &pk13, &vk13);
 
     // alice withdraws her 300 change (out_alice, index bob_idx + 1) at root4, fee 7 to the operator
+    // (relayer bound in the proof = the operator that submits the batch)
     let alice_idx = bob_idx + 1;
     let circuit = withdraw::WithdrawCircuit {
         keypair: alice.clone(),
@@ -600,6 +613,7 @@ fn e2e(args: &[String]) {
         amount: 300,
         recipient,
         fee: 7,
+        relayer: addr_fr(&TEST_OPERATOR),
         input: out_alice.clone(),
         merkle_proof: tree.generate_proof(alice_idx).unwrap(),
     };
@@ -608,8 +622,8 @@ fn e2e(args: &[String]) {
     let wproof2 = withdraw::prove(&wpk, circuit, rng).unwrap();
     withdraw::verify(&wvk, &wd2, &wproof2).unwrap();
     let batch_withdraw_json = format!(
-        "{{\"asset\": {asset}, \"amount\": 300, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 7, \"proof\": [{}]}}",
-        be(&wd2.nullifier), be(&wd2.freezer), be(&root4), hex(&addr), words(&wproof2)
+        "{{\"asset\": {asset}, \"amount\": 300, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 7, \"relayer\": \"{}\", \"proof\": [{}]}}",
+        be(&wd2.nullifier), be(&wd2.freezer), be(&root4), hex(&addr), hex(&TEST_OPERATOR), words(&wproof2)
     );
 
     // root after the batch: commitments inserted in batch order (transfers first, then nothing for withdraw)
@@ -620,10 +634,10 @@ fn e2e(args: &[String]) {
     let root5 = tree.get_root().unwrap();
 
     let json = format!(
-        "{{\n  \"auditorX\": \"{}\",\n  \"auditorY\": \"{}\",\n  \"root1\": \"{}\",\n  \"root2\": \"{}\",\n  \"deposits\": [{}],\n  \"transfer\": {},\n  \"withdraw\": {},\n  \"batch\": {{\n    \"aggregatorX\": \"{}\",\n    \"aggregatorY\": \"{}\",\n    \"deposits\": [{}],\n    \"root4\": \"{}\",\n    \"transfers\": [{}, {}],\n    \"withdraws\": [{}],\n    \"root5\": \"{}\"\n  }}\n}}\n",
-        be(&auditor.public.x), be(&auditor.public.y), be(&root1), be(&root2),
+        "{{\n  \"auditorX\": \"{}\",\n  \"auditorY\": \"{}\",\n  \"relayer\": \"{}\",\n  \"operator\": \"{}\",\n  \"root1\": \"{}\",\n  \"root2\": \"{}\",\n  \"deposits\": [{}],\n  \"transfer\": {},\n  \"withdraw\": {},\n  \"batch\": {{\n    \"aggregatorX\": \"{}\",\n    \"aggregatorY\": \"{}\",\n    \"aggregatorSecret\": \"{}\",\n    \"deposits\": [{}],\n    \"root4\": \"{}\",\n    \"transfers\": [{}, {}],\n    \"withdraws\": [{}],\n    \"root5\": \"{}\"\n  }}\n}}\n",
+        be(&auditor.public.x), be(&auditor.public.y), hex(&TEST_RELAYER), hex(&TEST_OPERATOR), be(&root1), be(&root2),
         deposits_json.join(", "), transfer_json, withdraw_json,
-        be(&aggregator.public.x), be(&aggregator.public.y), batch_deposits.join(", "), be(&root4), t23_json, t13_json, batch_withdraw_json, be(&root5)
+        be(&aggregator.public.x), be(&aggregator.public.y), hex(&secret_bytes(&aggregator)), batch_deposits.join(", "), be(&root4), t23_json, t13_json, batch_withdraw_json, be(&root5)
     );
     fs::write(fixtures.join("e2e.json"), json).unwrap();
     println!("wrote {}", fixtures.join("e2e.json").display());
@@ -686,7 +700,6 @@ fn verify_agg(args: &[String]) {
 // =============================================================================
 
 fn bench_batch(args: &[String]) {
-    use ark_ff::PrimeField;
     let n: usize = arg(args, "--n", "8").parse().unwrap();
     let keys = Path::new(&arg(args, "--keys", "artifacts")).to_path_buf();
     let fixtures = Path::new(&arg(args, "--fixtures", "solidity/test/fixtures")).to_path_buf();
@@ -716,8 +729,8 @@ fn bench_batch(args: &[String]) {
     for _ in 0..n + 2 {
         let out = OpenCommitment::generate(rng, asset, 100, owner.public);
         let (amemo, share) = out.audit_encrypt(rng, &auditor.public).unwrap();
-        let circuit = deposit::DepositCircuit { asset, amount: 100, output: out.clone(), audit: Some(deposit::AuditCircuit { auditor: auditor.public, memo: amemo.clone(), share }) };
-        let publics = circuit.deposit(rng).unwrap();
+        let circuit = deposit::DepositCircuit { asset, amount: 100, output: out.clone(), memo: out.memo_encrypt(rng).unwrap(), audit: Some(deposit::AuditCircuit { auditor: auditor.public, memo: amemo.clone(), share }) };
+        let publics = circuit.deposit();
         let proof = deposit::prove(&dpk, circuit, rng).unwrap();
         let idx = tree.add_leaf(out.commit()).unwrap();
         notes.push((idx, out));
@@ -745,10 +758,10 @@ fn bench_batch(args: &[String]) {
         let circuit = transfer::UtxoCircuit {
             keypair: owner.clone(),
             inputs: vec![transfer::UtxoInput { commitment: note.clone(), merkle_proof: tree.generate_proof(*idx).unwrap() }],
-            outputs: outs.iter().map(|c| transfer::UtxoOutput { commitment: c.clone() }).collect(),
+            outputs: outs.iter().map(|c| transfer::UtxoOutput { commitment: c.clone(), memo: c.memo_encrypt(rng).unwrap() }).collect(),
             audit: Some(transfer::AuditCircuit { auditor: auditor.public, memos: memos.clone(), shares }),
         };
-        let utxo = circuit.utxo(rng).unwrap();
+        let utxo = circuit.utxo();
         let t = std::time::Instant::now();
         let proof = transfer::prove(&tpk, circuit, rng).unwrap();
         prove_ms.push(t.elapsed().as_millis());
@@ -767,25 +780,24 @@ fn bench_batch(args: &[String]) {
         ));
     }
     let mut withdraws = vec![];
-    let mut addr = [0u8; 20];
-    addr[19] = 0x42;
-    let recipient = Fr::from_be_bytes_mod_order(&addr);
+    let addr = addr20(0x42);
+    let recipient = addr_fr(&addr);
     for (idx, note) in notes.iter().skip(n) {
-        let circuit = withdraw::WithdrawCircuit { keypair: owner.clone(), asset, amount: 100, recipient, fee: 3, input: note.clone(), merkle_proof: tree.generate_proof(*idx).unwrap() };
+        let circuit = withdraw::WithdrawCircuit { keypair: owner.clone(), asset, amount: 100, recipient, fee: 3, relayer: addr_fr(&TEST_OPERATOR), input: note.clone(), merkle_proof: tree.generate_proof(*idx).unwrap() };
         let wd = circuit.withdraw();
         let t = std::time::Instant::now();
         let proof = withdraw::prove(&wpk, circuit, rng).unwrap();
         let wp = t.elapsed().as_millis();
         withdraw::verify(&wvk, &wd, &proof).unwrap();
-        withdraws.push(format!("{{\"asset\": {asset}, \"amount\": 100, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 3, \"proof\": [{}]}}", be(&wd.nullifier), be(&wd.freezer), be(&root), hex(&addr), words(&proof)));
+        withdraws.push(format!("{{\"asset\": {asset}, \"amount\": 100, \"nullifier\": \"{}\", \"freezer\": \"{}\", \"root\": \"{}\", \"recipient\": \"{}\", \"fee\": 3, \"relayer\": \"{}\", \"proof\": [{}]}}", be(&wd.nullifier), be(&wd.freezer), be(&root), hex(&addr), hex(&TEST_OPERATOR), words(&proof)));
         println!("withdraw prove {wp} ms");
     }
     println!("native 1x3 prove ms: {:?}", prove_ms);
     println!("native 1x3 verify us: {:?}", verify_us);
 
     let json = format!(
-        "{{\n  \"auditorX\": \"{}\",\n  \"auditorY\": \"{}\",\n  \"root\": \"{}\",\n  \"deposits\": [{}],\n  \"transfers\": [{}],\n  \"withdraws\": [{}]\n}}\n",
-        be(&auditor.public.x), be(&auditor.public.y), be(&root), deposits.join(", "), transfers.join(", "), withdraws.join(", ")
+        "{{\n  \"auditorX\": \"{}\",\n  \"auditorY\": \"{}\",\n  \"operator\": \"{}\",\n  \"root\": \"{}\",\n  \"deposits\": [{}],\n  \"transfers\": [{}],\n  \"withdraws\": [{}]\n}}\n",
+        be(&auditor.public.x), be(&auditor.public.y), hex(&TEST_OPERATOR), be(&root), deposits.join(", "), transfers.join(", "), withdraws.join(", ")
     );
     fs::write(fixtures.join("bench.json"), json).unwrap();
     println!("wrote {}", fixtures.join("bench.json").display());

@@ -100,7 +100,8 @@ async fn main() -> Result<()> {
         let (ax, ay) = chain.auditor().await?;
         let auditor_x = evm::fr_from_bytes32(ax.as_slice()).map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let auditor_y = evm::fr_from_bytes32(ay.as_slice()).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        let verifier = verify::Verifier::load(&keys_dir, auditor_x, auditor_y, aggregator.clone())?;
+        let verifier =
+            verify::Verifier::load(&keys_dir, auditor_x, auditor_y, aggregator.clone(), chain.operator.as_slice())?;
         tracing::info!(
             chain_id = cfg.chain_id,
             app = %cfg.app,

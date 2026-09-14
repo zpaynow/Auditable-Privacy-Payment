@@ -1,60 +1,7 @@
 [
  {
   "type": "constructor",
-  "inputs": [
-   {
-    "name": "_verifiers",
-    "type": "tuple",
-    "internalType": "struct APP.Verifiers",
-    "components": [
-     {
-      "name": "deposit",
-      "type": "address",
-      "internalType": "address"
-     },
-     {
-      "name": "transfer2x2",
-      "type": "address",
-      "internalType": "address"
-     },
-     {
-      "name": "transfer1x2",
-      "type": "address",
-      "internalType": "address"
-     },
-     {
-      "name": "transfer2x3",
-      "type": "address",
-      "internalType": "address"
-     },
-     {
-      "name": "transfer1x3",
-      "type": "address",
-      "internalType": "address"
-     },
-     {
-      "name": "withdraw",
-      "type": "address",
-      "internalType": "address"
-     }
-    ]
-   },
-   {
-    "name": "_auditorX",
-    "type": "uint256",
-    "internalType": "uint256"
-   },
-   {
-    "name": "_auditorY",
-    "type": "uint256",
-    "internalType": "uint256"
-   },
-   {
-    "name": "_auditorAdmin",
-    "type": "address",
-    "internalType": "address"
-   }
-  ],
+  "inputs": [],
   "stateMutability": "nonpayable"
  },
  {
@@ -92,6 +39,32 @@
     "name": "",
     "type": "uint32",
     "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "UPGRADE_INTERFACE_VERSION",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "string",
+    "internalType": "string"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "VERSION",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "string",
+    "internalType": "string"
    }
   ],
   "stateMutability": "view"
@@ -252,6 +225,71 @@
  },
  {
   "type": "function",
+  "name": "initialize",
+  "inputs": [
+   {
+    "name": "_verifiers",
+    "type": "tuple",
+    "internalType": "struct APP.Verifiers",
+    "components": [
+     {
+      "name": "deposit",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "withdraw",
+      "type": "address",
+      "internalType": "address"
+     }
+    ]
+   },
+   {
+    "name": "_auditorX",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "_auditorY",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "_auditorAdmin",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "_owner",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
   "name": "isKnownRoot",
   "inputs": [
    {
@@ -335,6 +373,39 @@
  },
  {
   "type": "function",
+  "name": "pause",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "paused",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "proxiableUUID",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
   "name": "registerAsset",
   "inputs": [
    {
@@ -348,6 +419,13 @@
     "internalType": "address"
    }
   ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "renounceOwnership",
+  "inputs": [],
   "outputs": [],
   "stateMutability": "nonpayable"
  },
@@ -424,6 +502,51 @@
     "name": "allowed",
     "type": "bool",
     "internalType": "bool"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setVerifiers",
+  "inputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct APP.Verifiers",
+    "components": [
+     {
+      "name": "deposit",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "withdraw",
+      "type": "address",
+      "internalType": "address"
+     }
+    ]
    }
   ],
   "outputs": [],
@@ -651,6 +774,31 @@
  },
  {
   "type": "function",
+  "name": "unpause",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "upgradeToAndCall",
+  "inputs": [
+   {
+    "name": "newImplementation",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "data",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
   "name": "verifiers",
   "inputs": [],
   "outputs": [
@@ -862,6 +1010,19 @@
  },
  {
   "type": "event",
+  "name": "Initialized",
+  "inputs": [
+   {
+    "name": "version",
+    "type": "uint64",
+    "indexed": false,
+    "internalType": "uint64"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
   "name": "NewCommitment",
   "inputs": [
    {
@@ -925,6 +1086,109 @@
  },
  {
   "type": "event",
+  "name": "OwnershipTransferred",
+  "inputs": [
+   {
+    "name": "previousOwner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "newOwner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Paused",
+  "inputs": [
+   {
+    "name": "account",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Unpaused",
+  "inputs": [
+   {
+    "name": "account",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Upgraded",
+  "inputs": [
+   {
+    "name": "implementation",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "VerifiersSet",
+  "inputs": [
+   {
+    "name": "verifiers",
+    "type": "tuple",
+    "indexed": false,
+    "internalType": "struct APP.Verifiers",
+    "components": [
+     {
+      "name": "deposit",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x2",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer2x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "transfer1x3",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "withdraw",
+      "type": "address",
+      "internalType": "address"
+     }
+    ]
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
   "name": "Withdraw",
   "inputs": [
    {
@@ -962,6 +1226,22 @@
  },
  {
   "type": "error",
+  "name": "AddressEmptyCode",
+  "inputs": [
+   {
+    "name": "target",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "AmountMismatch",
+  "inputs": []
+ },
+ {
+  "type": "error",
   "name": "AssetAlreadyRegistered",
   "inputs": []
  },
@@ -977,7 +1257,38 @@
  },
  {
   "type": "error",
+  "name": "ERC1967InvalidImplementation",
+  "inputs": [
+   {
+    "name": "implementation",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "ERC1967NonPayable",
+  "inputs": []
+ },
+ {
+  "type": "error",
   "name": "EmptyBatch",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "EnforcedPause",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ExpectedPause",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "FailedCall",
   "inputs": []
  },
  {
@@ -992,6 +1303,11 @@
  },
  {
   "type": "error",
+  "name": "InvalidInitialization",
+  "inputs": []
+ },
+ {
+  "type": "error",
   "name": "InvalidProof",
   "inputs": []
  },
@@ -1002,12 +1318,12 @@
  },
  {
   "type": "error",
-  "name": "NotOperator",
+  "name": "NotInitializing",
   "inputs": []
  },
  {
   "type": "error",
-  "name": "NotOwner",
+  "name": "NotOperator",
   "inputs": []
  },
  {
@@ -1017,8 +1333,57 @@
  },
  {
   "type": "error",
+  "name": "OwnableInvalidOwner",
+  "inputs": [
+   {
+    "name": "owner",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "OwnableUnauthorizedAccount",
+  "inputs": [
+   {
+    "name": "account",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "SafeERC20FailedOperation",
+  "inputs": [
+   {
+    "name": "token",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
   "name": "TreeFull",
   "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UUPSUnauthorizedCallContext",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UUPSUnsupportedProxiableUUID",
+  "inputs": [
+   {
+    "name": "slot",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ]
  },
  {
   "type": "error",
@@ -1028,6 +1393,11 @@
  {
   "type": "error",
   "name": "UnknownRoot",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ZeroAddress",
   "inputs": []
  }
 ]

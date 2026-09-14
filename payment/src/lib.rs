@@ -14,6 +14,7 @@ mod structs;
 
 pub mod deposit;
 pub mod evm;
+pub mod ext;
 pub mod transfer;
 pub mod withdraw;
 

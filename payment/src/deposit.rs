@@ -2,6 +2,7 @@ use crate::{
     Amount, Asset, AzError, Commitment, Keypair, OpenCommitment, PublicKey,
     audit_gadget::audit_encrypt_gadget,
     commitment::commitment_gadget,
+    ext::{OWNER_MEMO_LEN, memos_hash},
     keys::keypair_gadget,
     transfer::{Proof, ProvingKey, VerifyingKey},
 };
@@ -20,6 +21,9 @@ pub struct DepositCircuit {
     pub asset: Asset,
     pub amount: Amount,
     pub output: OpenCommitment,
+    /// owner memo of `output` (`OpenCommitment::memo_encrypt`); bound into the proof via
+    /// the `memos_hash` public input so nobody can swap it in the mempool
+    pub memo: Vec<u8>,
     pub audit: Option<AuditCircuit>,
 }
 
@@ -37,8 +41,32 @@ pub struct Deposit {
     pub asset: Asset,
     pub amount: Amount,
     pub commitment: Commitment,
+    /// owner memo (calldata, hashed into the last public input)
     pub memo: Vec<u8>,
     pub audit: Option<Audit>,
+}
+
+impl Deposit {
+    /// keccak256(memo || audit.memo) mod r — the last public input.
+    pub fn memos_hash(&self) -> Fr {
+        let audit = self.audit.as_ref().map(|a| std::slice::from_ref(&a.memo));
+        memos_hash(std::slice::from_ref(&self.memo), audit)
+    }
+
+    /// Public inputs in the exact order the circuit allocates them:
+    /// `[asset, amount, commitment, (auditorX, auditorY, ct0, ct1, ct2), memosHash]`.
+    pub fn public_inputs(&self) -> crate::Result<Vec<Fr>> {
+        let mut v = vec![Fr::from(self.asset), Fr::from(self.amount), self.commitment];
+        if let Some(audit) = &self.audit {
+            v.push(audit.auditor.x);
+            v.push(audit.auditor.y);
+            for bytes in audit.memo[64..].chunks(32) {
+                v.push(Fr::deserialize_compressed(bytes).map_err(|_| AzError::Groth16Verify)?);
+            }
+        }
+        v.push(self.memos_hash());
+        Ok(v)
+    }
 }
 
 /// Deposit public inputs
@@ -49,27 +77,9 @@ pub struct Audit {
 }
 
 impl DepositCircuit {
-    /// generate public used deposit
-    pub fn deposit<R: CryptoRng + Rng>(&self, prng: &mut R) -> crate::Result<Deposit> {
-        let commitment = self.output.commit();
-        let memo = self.output.memo_encrypt(prng)?;
-
-        let audit = if let Some(audit) = &self.audit {
-            Some(Audit {
-                auditor: audit.auditor,
-                memo: audit.memo.clone(),
-            })
-        } else {
-            None
-        };
-
-        Ok(Deposit {
-            asset: self.asset,
-            amount: self.amount,
-            commitment,
-            memo,
-            audit,
-        })
+    /// Public part of this deposit (everything the contract call needs).
+    pub fn deposit(&self) -> Deposit {
+        self.publics()
     }
 
     /// generate public inputs
@@ -89,7 +99,7 @@ impl DepositCircuit {
             asset: self.asset,
             amount: self.amount,
             commitment,
-            memo: vec![],
+            memo: self.memo.clone(),
             audit,
         }
     }
@@ -170,6 +180,13 @@ impl ConstraintSynthesizer<Fr> for DepositCircuit {
             )?;
         }
 
+        // Bind the calldata hash (owner memo || audit memo). A public input that appears in
+        // no constraint is not bound by Groth16, so tie it to a witness copy.
+        let memos_hash = utxo.memos_hash();
+        let ext_var = FpVar::new_input(cs.clone(), || Ok(memos_hash))?;
+        let ext_w = FpVar::new_witness(cs.clone(), || Ok(memos_hash))?;
+        ext_var.enforce_equal(&ext_w)?;
+
         Ok(())
     }
 }
@@ -204,6 +221,7 @@ pub fn setup<R: Rng + CryptoRng>(
         asset: 1,
         amount: 1,
         output,
+        memo: vec![0u8; OWNER_MEMO_LEN],
         audit,
     };
 
@@ -224,22 +242,7 @@ pub fn prove<R: Rng + CryptoRng>(
 
 /// Verify a Groth16 proof for a withdraw transaction
 pub fn verify(vk: &VerifyingKey, utxo: &Deposit, proof: &Proof) -> crate::Result<()> {
-    let mut publics = Vec::new();
-
-    publics.push(Fr::from(utxo.asset));
-    publics.push(Fr::from(utxo.amount));
-    publics.push(utxo.commitment);
-
-    if let Some(audit) = &utxo.audit {
-        publics.push(audit.auditor.x);
-        publics.push(audit.auditor.y);
-
-        for bytes in audit.memo[64..].chunks(32) {
-            // skip first pk
-            let ct = Fr::deserialize_compressed(bytes).map_err(|_| AzError::Groth16Verify)?;
-            publics.push(ct);
-        }
-    }
+    let publics = utxo.public_inputs()?;
 
     let res = Groth16::<Bn254>::verify(vk, &publics, proof).map_err(|_| AzError::Groth16Verify)?;
 
@@ -267,6 +270,7 @@ mod tests {
         let amount = 100;
 
         let output = OpenCommitment::generate(rng, asset, amount, keypair.public);
+        let memo = output.memo_encrypt(rng).unwrap();
 
         // Setup
         let (pk, vk) = setup(false, rng).unwrap();
@@ -290,6 +294,7 @@ mod tests {
             asset,
             amount,
             output,
+            memo,
             audit: None,
         };
         let utxo = circuit.publics();
@@ -299,6 +304,11 @@ mod tests {
 
         // Verify
         verify(&vk, &utxo, &proof).unwrap();
+
+        // A swapped owner memo must not verify (mempool front-running protection)
+        let mut swapped = utxo.clone();
+        swapped.memo[40] ^= 1;
+        assert!(verify(&vk, &swapped, &proof).is_err());
     }
 
     #[test]
@@ -313,6 +323,7 @@ mod tests {
 
         // Create output
         let output = OpenCommitment::generate(rng, asset, amount, keypair.public);
+        let owner_memo = output.memo_encrypt(rng).unwrap();
         let (memo, share) = output.audit_encrypt(rng, &auditor.public).unwrap();
 
         // Setup with audit
@@ -337,6 +348,7 @@ mod tests {
             asset,
             amount,
             output,
+            memo: owner_memo,
             audit: Some(AuditCircuit {
                 auditor: auditor.public,
                 memo,

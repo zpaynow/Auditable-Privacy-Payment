@@ -6,11 +6,13 @@ pragma solidity ^0.8.20;
 /// @notice Bit-exact port of the arkworks `PoseidonSponge` used by app-payment
 ///         (t = 3, rate = 2, capacity = 1, alpha = 31, 8 full + 57 partial rounds)
 ///         restricted to the 2-to-1 hash: absorb(left), absorb(right), squeeze(1).
+///         `hash` is public so this deploys as a linked library: inlining it into APP puts
+///         the pool over the 24 KB contract-size limit.
 ///         hash(l, r) = permute([0, l, r])[1] over the BN254 scalar field.
 library PoseidonT3 {
     uint256 internal constant Q = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
-    function hash(uint256 l, uint256 r) internal pure returns (uint256 out) {
+    function hash(uint256 l, uint256 r) public pure returns (uint256 out) {
         require(l < Q && r < Q, "PoseidonT3: input not in field");
         assembly {
             // x^31 = x^16 * x^8 * x^4 * x^2 * x

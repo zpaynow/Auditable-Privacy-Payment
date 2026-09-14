@@ -68,8 +68,22 @@ export default function App() {
 
   useEffect(() => {
     warmProver()
-    recallKey().then((k) => k && setKey(k))
   }, [])
+
+  // The payment key belongs to one (chain, contract). Drop it the moment either changes, so a
+  // chain switch can never spend or deposit under the previous chain's identity, and restore the
+  // stored key only when it was derived for the deployment now selected.
+  useEffect(() => {
+    setKey(null)
+    if (!deployment) return
+    let cancelled = false
+    void recallKey(chainId, deployment.app).then((k) => {
+      if (!cancelled && k) setKey(k)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [chainId, deployment])
 
   // (re)create the wallet whenever key / chain / contract changes: prefer the auditor service
   // (no chain scan, no local tree), fall back to scanning the chain ourselves
@@ -128,7 +142,7 @@ export default function App() {
     try {
       const sig = await signMessageAsync({ message: ZK_KEY_MESSAGE(chainId, deployment.app) })
       const k = await keyFromSeed(hexToBytes(sig))
-      rememberKey(k)
+      rememberKey(k, chainId, deployment.app)
       setKey(k)
       pushLog(`Payment key derived: ${short(k.address, 8)}`, 'ok')
     } catch (e) {

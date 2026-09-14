@@ -36,19 +36,43 @@ export async function addressOf(pk: Uint8Array): Promise<Hex> {
 
 const STORAGE = 'app.zk.secret'
 
-export function rememberKey(k: ZkKey) {
+/**
+ * The payment key is derived per (chain, pool contract), so a stored key is only valid for the
+ * deployment it came from. It used to be kept unscoped, which meant switching chains in the UI
+ * kept spending under the previous chain's identity: notes created that way belong to a key the
+ * app will never derive again on that chain, and silently disappear from the wallet.
+ */
+interface StoredKey {
+  secret: Hex
+  chainId: number
+  app: string
+}
+
+export function rememberKey(k: ZkKey, chainId: number, app: string) {
   try {
-    sessionStorage.setItem(STORAGE, bytesToHex(k.secret))
+    const rec: StoredKey = { secret: bytesToHex(k.secret), chainId, app: app.toLowerCase() }
+    sessionStorage.setItem(STORAGE, JSON.stringify(rec))
   } catch {
     /* private mode etc. */
   }
 }
 
-export async function recallKey(): Promise<ZkKey | null> {
+/** Returns the stored key only if it was derived for exactly this deployment. */
+export async function recallKey(chainId: number, app: string): Promise<ZkKey | null> {
   try {
     const s = sessionStorage.getItem(STORAGE)
     if (!s) return null
-    return await keyFromSecret(hexToBytes(s))
+    let rec: StoredKey
+    try {
+      rec = JSON.parse(s) as StoredKey
+    } catch {
+      // pre-scoping format: a bare secret with no record of its deployment. It cannot be
+      // attributed safely, so drop it and make the user derive again.
+      sessionStorage.removeItem(STORAGE)
+      return null
+    }
+    if (!rec?.secret || rec.chainId !== chainId || rec.app?.toLowerCase() !== app.toLowerCase()) return null
+    return await keyFromSecret(hexToBytes(rec.secret))
   } catch {
     return null
   }

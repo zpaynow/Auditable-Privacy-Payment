@@ -156,5 +156,19 @@ export const MT_PROOF_LEN = TREE_DEPTH * 64 + 32 + 12
 export const OWNER_MEMO_LEN = 104
 export const AUDIT_MEMO_LEN = 160
 
+/**
+ * Message signed to derive the shielded payment key. It deliberately binds the identity to one
+ * (chain, pool): a different pool is a different note set, and reusing one payment key across
+ * pools would link them.
+ *
+ * `app` is the ERC-1967 proxy, which survives implementation upgrades, so an address change here
+ * means a genuinely new pool and a new identity is the correct outcome. Do not drop `contract`
+ * from this message to make identities portable: that would link a user across every pool on the
+ * chain. When a new pool is deployed, existing holders keep their funds under the old identity
+ * and recover it with `web/scripts/recover-key.mjs`, which replays this message for every pool
+ * this repo has used.
+ *
+ * The derived key is stored scoped to exactly this (chainId, app); see lib/keys.ts.
+ */
 export const ZK_KEY_MESSAGE = (chainId: number, app: string) =>
   `Auditable Privacy Payment\n\nSign to derive your private payment key.\nchain: ${chainId}\ncontract: ${app.toLowerCase()}\n\nThis signature never leaves your browser.`
